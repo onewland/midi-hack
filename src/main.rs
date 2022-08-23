@@ -92,34 +92,29 @@ fn is_ascending_major_scale(key_events: &Vec<KeyMessage>) -> bool {
 
     // go pair by pair
     while pair_based_index < key_events.len() / 2 {
-        let granular_index = pair_based_index * 2;
-
+        let e1 = key_events[pair_based_index * 2];
+        let e2 = key_events[pair_based_index * 2 + 1];
         // enforce down then up
-        if key_events[granular_index].message_type != MidiMessageTypes::KeyDown {
-            return false;
-        }
-        if key_events[granular_index + 1].message_type != MidiMessageTypes::KeyUp {
+        if e1.message_type != MidiMessageTypes::KeyDown
+            || e2.message_type != MidiMessageTypes::KeyUp
+        {
             return false;
         }
 
         // enforce same key down then up
-        if key_events[granular_index].key != key_events[granular_index + 1].key {
+        if e1.key != e2.key {
             return false;
         }
 
         // if not on the first pair, make sure we're moving up by correct number of steps
-        if pair_based_index > 0
-            && (key_events[granular_index].key - base_note != proper_deltas[(pair_based_index - 1) % 8])
+        if pair_based_index > 0 && (e1.key - base_note != proper_deltas[(pair_based_index - 1) % 8])
         {
             return false;
         } else {
             // this pair is good, on to the next one and update the base note
-            base_note = key_events[granular_index].key
+            base_note = e1.key
         }
         pair_based_index += 1
-    }
-    if key_events[0].message_type != MidiMessageTypes::KeyDown {
-        return false;
     }
 
     return true;
@@ -184,8 +179,17 @@ fn run() -> Result<(), Box<dyn Error>> {
                     let parsed_message = build_key_message(stamp, message);
                     buf.accept(parsed_message);
                     buf.print();
-                    println!("is major scale: {}", is_ascending_major_scale(&buf.buf))
-                    // sentry::capture_message(format!("user played {str_note}").as_str(), sentry::Level::Info);
+                    println!("is major scale: {}", is_ascending_major_scale(&buf.buf));
+                    if is_ascending_major_scale(&buf.buf) {
+                        sentry::capture_message(
+                            format!(
+                                "user played major scale starting at {}",
+                                buf.buf[0].readable_note()
+                            )
+                            .as_str(),
+                            sentry::Level::Info,
+                        );
+                    }
                 }
             }
         },
