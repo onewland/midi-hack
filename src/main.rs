@@ -42,11 +42,21 @@ impl KeyMessage {
     }
 }
 
-#[derive(Clone)]
+// #[derive(Clone)]
 struct KeyBuffer {
     buf: Vec<KeyMessage>,
     most_recent_insert: u64,
-    // run_end_listeners: Vec<Box<dyn RunEndListener>>,
+    run_end_listeners: Vec<Box<dyn RunEndListener + Send>>,
+}
+
+impl KeyBuffer {
+    fn new() -> KeyBuffer {
+        return KeyBuffer {
+            buf: Vec::new(),
+            most_recent_insert: 0,
+            run_end_listeners: Vec::new(),
+        };
+    }
 }
 
 trait RunEndListener {
@@ -106,8 +116,10 @@ fn is_ascending_major_scale(key_events: &Vec<KeyMessage>) -> bool {
             return false;
         }
 
-        // if not on the first pair, make sure we're moving up by correct number of steps
-        if pair_based_index > 0 && (e1.key - base_note != proper_deltas[(pair_based_index - 1) % 8])
+        // if not on the first pair, make sure we're moving up, and by correct number of steps
+        if pair_based_index > 0
+            && e1.key > base_note
+            && (e1.key - base_note != proper_deltas[(pair_based_index % 8) - 1])
         {
             return false;
         } else {
@@ -157,10 +169,8 @@ fn run() -> Result<(), Box<dyn Error>> {
     println!("\nOpening connection");
     let _in_port_name = midi_in.port_name(in_port)?;
     let known_message_types = vec![KEY_DOWN, KEY_UP, KEEP_ALIVE, TIME_KEEPING];
-    let mut buf = KeyBuffer {
-        most_recent_insert: 0,
-        buf: Vec::new(),
-    };
+    let mut buf = KeyBuffer::new();
+
     // _conn_in needs to be a named parameter, because it needs to be kept alive until the end of the scope
     let _conn_in = midi_in.connect(
         in_port,
