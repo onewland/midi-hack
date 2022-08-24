@@ -1,7 +1,9 @@
-use std::cmp::max;
+use std::{cmp::max, thread::JoinHandle};
 use std::io::stdin;
 // use std::process::Command;
 use std::error::Error;
+use std::sync::mpsc::{sync_channel, TryRecvError, RecvTimeoutError};
+use std::sync::mpsc::Receiver;
 
 use midir::{Ignore, MidiInput};
 
@@ -47,6 +49,7 @@ struct KeyBuffer {
     buf: Vec<KeyMessage>,
     most_recent_insert: u64,
     run_end_listeners: Vec<Box<dyn RunEndListener + Send>>,
+    heartbeat_count: usize
 }
 
 impl KeyBuffer {
@@ -55,20 +58,35 @@ impl KeyBuffer {
             buf: Vec::new(),
             most_recent_insert: 0,
             run_end_listeners: Vec::new(),
+            heartbeat_count: 0
         };
     }
 
     fn accept(&mut self, message: KeyMessage) {
         if message.timestamp - self.most_recent_insert > BREAK_DELAY_MICROSECONDS {
-            println!("calling listeners");
-            for listener in &self.run_end_listeners {
-                listener.as_ref().on_run_end(&self.buf);
-            }
-            println!("new run");
-            self.buf.clear();
+            self.end_run();
         }
         self.buf.push(message);
         self.most_recent_insert = max(message.timestamp, self.most_recent_insert);
+        self.print();
+    }
+
+    fn end_run(&mut self) {
+        println!("calling listeners");
+        for listener in &self.run_end_listeners {
+            listener.as_ref().on_run_end(&self.buf);
+        }
+        println!("new run");
+        self.buf.clear();
+        self.heartbeat_count = 0;
+    }
+
+    fn heartbeat(&mut self, elapsed: u64) {
+        if self.heartbeat_count > 10 {
+            self.end_run()
+        }
+        self.heartbeat_count += 1;
+        self.print()
     }
 
     fn add_listener<T: 'static + RunEndListener + Send>(&mut self, listener: T) {
@@ -84,6 +102,21 @@ impl KeyBuffer {
             msg.print()
         }
         println!("]")
+    }
+
+    pub(crate) fn start_recv_loop(mut self, receiver: Receiver<KeyMessage>, heartbeat_receiver: Receiver<u64>) -> JoinHandle<()> {
+        std::thread::spawn(move || {
+            loop {
+                match receiver.recv_timeout(std::time::Duration::from_nanos(100)) {
+                    Ok(message) => self.accept(message),
+                    Err(_recv_timeout_error) => (), // this is fine
+                };
+                match heartbeat_receiver.recv_timeout(std::time::Duration::from_nanos(100)) {
+                    Ok(message) => self.heartbeat(message),
+                    Err(_recv_timeout_error) => (), // this is fine
+                }
+            }
+        })
     }
 }
 
@@ -195,6 +228,9 @@ fn run() -> Result<(), Box<dyn Error>> {
     let _in_port_name = midi_in.port_name(in_port)?;
     
     // Listener setup
+    let (midi_sender, midi_receiver) = sync_channel(1);
+    let (heartbeat_sender, heartbeat_receiver) = sync_channel(1);
+
     let known_message_types = vec![KEY_DOWN, KEY_UP, KEEP_ALIVE, TIME_KEEPING];
     let mut buf = KeyBuffer::new();
     buf.add_listener(AscendingScaleNotifier {});
@@ -215,13 +251,26 @@ fn run() -> Result<(), Box<dyn Error>> {
             if message.len() == 3 {
                 if message[0] == KEY_UP || message[0] == KEY_DOWN {
                     let parsed_message = build_key_message(stamp, message);
-                    buf.accept(parsed_message);
-                    buf.print();
+                    midi_sender.send(parsed_message);
+                    // buf.accept(parsed_message);
+                    // buf.print();
                 }
             }
         },
         (),
     )?;
+
+    std::thread::spawn(move || {
+        const HEARTBEAT_LAPSE_SECONDS : u64 = 1;
+
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(HEARTBEAT_LAPSE_SECONDS));
+            heartbeat_sender.send(HEARTBEAT_LAPSE_SECONDS);
+        }
+    });
+
+    buf.start_recv_loop(midi_receiver, heartbeat_receiver);
+
     input.clear();
     stdin().read_line(&mut input)?; // wait for next enter key press
 
