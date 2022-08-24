@@ -57,13 +57,7 @@ impl KeyBuffer {
             run_end_listeners: Vec::new(),
         };
     }
-}
 
-trait RunEndListener {
-    fn on_run_end(&self, buf: &Vec<KeyMessage>);
-}
-
-impl KeyBuffer {
     fn accept(&mut self, message: KeyMessage) {
         if message.timestamp - self.most_recent_insert > BREAK_DELAY_MICROSECONDS {
             println!("calling listeners");
@@ -93,10 +87,16 @@ impl KeyBuffer {
     }
 }
 
+trait RunEndListener {
+    fn on_run_end(&self, buf: &Vec<KeyMessage>);
+}
+
 struct AscendingScaleNotifier {}
 
 impl RunEndListener for AscendingScaleNotifier {
     fn on_run_end(&self, buf: &Vec<KeyMessage>) {
+        println!("is major scale: {}", is_ascending_major_scale(&buf));
+
         if is_ascending_major_scale(&buf) {
             sentry::capture_message(
                 format!(
@@ -174,6 +174,7 @@ fn build_key_message(timestamp: u64, unstructured_message: &[u8]) -> KeyMessage 
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
+    // Midi read setup
     let mut input = String::new();
     let mut midi_in = MidiInput::new("midir reading input")?;
     midi_in.ignore(Ignore::None);
@@ -192,11 +193,13 @@ fn run() -> Result<(), Box<dyn Error>> {
     };
     println!("\nOpening connection");
     let _in_port_name = midi_in.port_name(in_port)?;
+    
+    // Listener setup
     let known_message_types = vec![KEY_DOWN, KEY_UP, KEEP_ALIVE, TIME_KEEPING];
     let mut buf = KeyBuffer::new();
     buf.add_listener(AscendingScaleNotifier {});
 
-    // _conn_in needs to be a named parameter, because it needs to be kept alive until the end of the scope
+    // Start the read loop
     let _conn_in = midi_in.connect(
         in_port,
         "midir-read-input",
@@ -214,17 +217,6 @@ fn run() -> Result<(), Box<dyn Error>> {
                     let parsed_message = build_key_message(stamp, message);
                     buf.accept(parsed_message);
                     buf.print();
-                    println!("is major scale: {}", is_ascending_major_scale(&buf.buf));
-                    // if is_ascending_major_scale(&buf.buf) {
-                    //     sentry::capture_message(
-                    //         format!(
-                    //             "user played major scale starting at {}",
-                    //             buf.buf[0].readable_note()
-                    //         )
-                    //         .as_str(),
-                    //         sentry::Level::Info,
-                    //     );
-                    // }
                 }
             }
         },
