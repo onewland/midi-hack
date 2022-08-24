@@ -252,8 +252,6 @@ fn run() -> Result<(), Box<dyn Error>> {
                 if message[0] == KEY_UP || message[0] == KEY_DOWN {
                     let parsed_message = build_key_message(stamp, message);
                     midi_sender.send(parsed_message);
-                    // buf.accept(parsed_message);
-                    // buf.print();
                 }
             }
         },
