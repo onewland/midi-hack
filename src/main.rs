@@ -60,17 +60,25 @@ impl KeyBuffer {
 }
 
 trait RunEndListener {
-    fn on_run_end(&self, buf: Vec<KeyMessage>);
+    fn on_run_end(&self, buf: &Vec<KeyMessage>);
 }
 
 impl KeyBuffer {
     fn accept(&mut self, message: KeyMessage) {
         if message.timestamp - self.most_recent_insert > BREAK_DELAY_MICROSECONDS {
+            println!("calling listeners");
+            for listener in &self.run_end_listeners {
+                listener.as_ref().on_run_end(&self.buf);
+            }
             println!("new run");
             self.buf.clear();
         }
         self.buf.push(message);
         self.most_recent_insert = max(message.timestamp, self.most_recent_insert);
+    }
+
+    fn add_listener<T: 'static + RunEndListener + Send>(&mut self, listener: T) {
+        self.run_end_listeners.push(Box::new(listener))
     }
 
     fn print(&self) {
@@ -82,6 +90,23 @@ impl KeyBuffer {
             msg.print()
         }
         println!("]")
+    }
+}
+
+struct AscendingScaleNotifier {}
+
+impl RunEndListener for AscendingScaleNotifier {
+    fn on_run_end(&self, buf: &Vec<KeyMessage>) {
+        if is_ascending_major_scale(&buf) {
+            sentry::capture_message(
+                format!(
+                    "user played major scale starting at {}",
+                    buf[0].readable_note()
+                )
+                .as_str(),
+                sentry::Level::Info,
+            );
+        }
     }
 }
 
@@ -156,10 +181,9 @@ fn run() -> Result<(), Box<dyn Error>> {
     let in_port = match in_ports.len() {
         0 => panic!("no device found"),
         1 => {
-            println!(
-                "Choosing the only available input port: {}",
-                midi_in.port_name(&in_ports[0]).unwrap()
-            );
+            let device_name = midi_in.port_name(&in_ports[0]).unwrap();
+            println!("Choosing the only available input port: {}", device_name);
+            sentry::configure_scope(|scope| scope.set_tag("midi_device", device_name));
             &in_ports[0]
         }
         _ => {
@@ -170,6 +194,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let _in_port_name = midi_in.port_name(in_port)?;
     let known_message_types = vec![KEY_DOWN, KEY_UP, KEEP_ALIVE, TIME_KEEPING];
     let mut buf = KeyBuffer::new();
+    buf.add_listener(AscendingScaleNotifier {});
 
     // _conn_in needs to be a named parameter, because it needs to be kept alive until the end of the scope
     let _conn_in = midi_in.connect(
@@ -190,16 +215,16 @@ fn run() -> Result<(), Box<dyn Error>> {
                     buf.accept(parsed_message);
                     buf.print();
                     println!("is major scale: {}", is_ascending_major_scale(&buf.buf));
-                    if is_ascending_major_scale(&buf.buf) {
-                        sentry::capture_message(
-                            format!(
-                                "user played major scale starting at {}",
-                                buf.buf[0].readable_note()
-                            )
-                            .as_str(),
-                            sentry::Level::Info,
-                        );
-                    }
+                    // if is_ascending_major_scale(&buf.buf) {
+                    //     sentry::capture_message(
+                    //         format!(
+                    //             "user played major scale starting at {}",
+                    //             buf.buf[0].readable_note()
+                    //         )
+                    //         .as_str(),
+                    //         sentry::Level::Info,
+                    //     );
+                    // }
                 }
             }
         },
