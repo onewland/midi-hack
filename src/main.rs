@@ -79,12 +79,16 @@ impl KeyBuffer {
     }
 
     fn call_listeners(&mut self) {
+        let mut hit_end = false;
         for listener in &self.run_end_listeners {
-            listener.as_ref().on_run_end(&self.buf);
+            hit_end = hit_end || listener.as_ref().on_keypress(&self.buf);
+        }
+        if hit_end {
+            self.end_run()
         }
     }
 
-    fn heartbeat(&mut self, elapsed: u64) {
+    fn heartbeat(&mut self, _elapsed: u64) {
         if self.heartbeat_count > 10 {
             self.end_run()
         }
@@ -128,13 +132,15 @@ impl KeyBuffer {
 }
 
 trait RunEndListener {
-    fn on_run_end(&self, buf: &Vec<KeyMessage>);
+    // RunEndListener listens on runs for the end, if it returns
+    // true it has detected an end of a run, false means that it has not
+    fn on_keypress(&self, buf: &Vec<KeyMessage>) -> bool;
 }
 
 struct AscendingScaleNotifier {}
 
 impl RunEndListener for AscendingScaleNotifier {
-    fn on_run_end(&self, buf: &Vec<KeyMessage>) {
+    fn on_keypress(&self, buf: &Vec<KeyMessage>) -> bool {
         let major_scale_deltas = [2, 2, 1, 2, 2, 2, 1];
         let harmonic_minor_scale_deltas = [2, 1, 2, 2, 1, 3, 1];
 
@@ -152,6 +158,7 @@ impl RunEndListener for AscendingScaleNotifier {
                 .as_str(),
                 sentry::Level::Info,
             );
+            return true
         }
 
         if scale_matches_increments(&buf, harmonic_minor_scale_deltas) {
@@ -163,7 +170,10 @@ impl RunEndListener for AscendingScaleNotifier {
                 .as_str(),
                 sentry::Level::Info,
             );
+            return true
         }
+
+        return false
     }
 }
 
@@ -198,15 +208,17 @@ fn scale_matches_increments(key_events: &Vec<KeyMessage>, proper_deltas: [u8; 7]
         }
 
         // if not on the first pair, make sure we're moving up, and by correct number of steps
-        if pair_based_index > 0
-            && e1.key > base_note
-            && (e1.key - base_note != proper_deltas[(pair_based_index % 8) - 1])
-        {
-            return false;
-        } else {
-            // this pair is good, on to the next one and update the base note
-            base_note = e1.key
+        if pair_based_index > 0 {
+            if e1.key <= base_note {
+                return false
+            }
+            if e1.key - base_note != proper_deltas[(pair_based_index % 8) - 1] {
+                return false;
+            }
         }
+
+        // nothing eliminated this pair, updated the base note and move on
+        base_note = e1.key;
         pair_based_index += 1
     }
 
