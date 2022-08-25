@@ -1,9 +1,10 @@
 use std::io::stdin;
+
 use std::{cmp::max, thread::JoinHandle};
 // use std::process::Command;
 use std::error::Error;
 use std::sync::mpsc::Receiver;
-use std::sync::mpsc::{sync_channel, RecvTimeoutError, TryRecvError};
+use std::sync::mpsc::{sync_channel};
 
 use midir::{Ignore, MidiInput};
 
@@ -12,7 +13,7 @@ const KEY_UP: u8 = 128;
 const KEEP_ALIVE: u8 = 254;
 const TIME_KEEPING: u8 = 208;
 
-const BREAK_DELAY_MICROSECONDS: u64 = 4_000_000;
+const HEARTBEATS_PER_AUTO_NEW_RUN: usize = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum MidiMessageTypes {
@@ -26,6 +27,11 @@ struct KeyMessage {
     timestamp: u64,
     message_type: MidiMessageTypes,
     key: u8,
+}
+
+enum ControlMessage {
+    Heartbeat,
+    NewRun
 }
 
 impl KeyMessage {
@@ -63,9 +69,6 @@ impl KeyBuffer {
     }
 
     fn accept(&mut self, message: KeyMessage) {
-        if message.timestamp - self.most_recent_insert > BREAK_DELAY_MICROSECONDS {
-            self.end_run();
-        }
         self.buf.push(message);
         self.most_recent_insert = max(message.timestamp, self.most_recent_insert);
         self.print();
@@ -73,7 +76,7 @@ impl KeyBuffer {
     }
 
     fn end_run(&mut self) {
-        println!("new run");
+        println!("{}", "[new run]");
         self.buf.clear();
         self.heartbeat_count = 0;
     }
@@ -88,8 +91,15 @@ impl KeyBuffer {
         }
     }
 
-    fn heartbeat(&mut self, _elapsed: u64) {
-        if self.heartbeat_count > 10 {
+    fn handle_control_message(&mut self, msg: ControlMessage) {
+        match msg {
+            ControlMessage::Heartbeat => self.heartbeat(),
+            ControlMessage::NewRun => self.end_run()
+        }
+    }
+
+    fn heartbeat(&mut self) {
+        if self.heartbeat_count > HEARTBEATS_PER_AUTO_NEW_RUN {
             self.end_run()
         }
         self.heartbeat_count += 1;
@@ -105,25 +115,34 @@ impl KeyBuffer {
             "KeyBuffer [ most_recent_insert = {} ] [ keys = ",
             self.most_recent_insert
         );
-        for msg in &self.buf {
-            msg.print()
-        }
+        let mut last_msg: Option<KeyMessage> = None;
+        self.buf.iter().for_each(|msg| {
+            // print rest time since prior note
+            match last_msg { 
+                None => (),
+                Some(prev) => print!("{} ", msg.timestamp - prev.timestamp)
+            }
+             // print note
+            msg.print();
+
+            last_msg = Some(*msg);
+        });
         println!("]")
     }
 
     pub(crate) fn start_recv_loop(
         mut self,
-        receiver: Receiver<KeyMessage>,
-        heartbeat_receiver: Receiver<u64>,
+        playback_receiver: Receiver<KeyMessage>,
+        control_receiver: Receiver<ControlMessage>,
     ) -> JoinHandle<()> {
         std::thread::spawn(move || {
             loop {
-                match receiver.recv_timeout(std::time::Duration::from_nanos(100)) {
+                match playback_receiver.recv_timeout(std::time::Duration::from_nanos(100)) {
                     Ok(message) => self.accept(message),
                     Err(_recv_timeout_error) => (), // this is fine
                 };
-                match heartbeat_receiver.recv_timeout(std::time::Duration::from_nanos(100)) {
-                    Ok(message) => self.heartbeat(message),
+                match control_receiver.recv_timeout(std::time::Duration::from_nanos(100)) {
+                    Ok(message) => self.handle_control_message(message),
                     Err(_recv_timeout_error) => (), // this is fine
                 }
             }
@@ -137,8 +156,7 @@ trait RunEndListener {
     fn on_keypress(&self, buf: &Vec<KeyMessage>) -> bool;
 }
 
-struct AscendingScaleNotifier {}
-
+struct AscendingScaleNotifier;
 impl RunEndListener for AscendingScaleNotifier {
     fn on_keypress(&self, buf: &Vec<KeyMessage>) -> bool {
         let major_scale_deltas = [2, 2, 1, 2, 2, 2, 1];
@@ -173,6 +191,14 @@ impl RunEndListener for AscendingScaleNotifier {
             return true
         }
 
+        return false
+    }
+}
+
+struct MinorMajor7ChordListener;
+impl RunEndListener for MinorMajor7ChordListener {
+    fn on_keypress(&self, buf: &Vec<KeyMessage>) -> bool {
+        let major_minor_chord_deltas = [3,5,4];
         return false
     }
 }
@@ -263,12 +289,14 @@ fn run() -> Result<(), Box<dyn Error>> {
     let _in_port_name = midi_in.port_name(in_port)?;
 
     // Listener setup
-    let (midi_sender, midi_receiver) = sync_channel(1);
-    let (heartbeat_sender, heartbeat_receiver) = sync_channel(1);
+    let (playback_sender, playback_receiver) = sync_channel(1);
+    let (control_sender, control_receiver) = sync_channel(1);
+    let control_sender_fg = control_sender.clone();
 
     let known_message_types = vec![KEY_DOWN, KEY_UP, KEEP_ALIVE, TIME_KEEPING];
     let mut buf = KeyBuffer::new();
     buf.add_listener(AscendingScaleNotifier {});
+    buf.add_listener(MinorMajor7ChordListener {});
 
     // Start the read loop
     let _conn_in = midi_in.connect(
@@ -286,7 +314,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             if message.len() == 3 {
                 if message[0] == KEY_UP || message[0] == KEY_DOWN {
                     let parsed_message = build_key_message(stamp, message);
-                    midi_sender.send(parsed_message);
+                    playback_sender.send(parsed_message);
                 }
             }
         },
@@ -298,14 +326,24 @@ fn run() -> Result<(), Box<dyn Error>> {
 
         loop {
             std::thread::sleep(std::time::Duration::from_secs(HEARTBEAT_LAPSE_SECONDS));
-            heartbeat_sender.send(HEARTBEAT_LAPSE_SECONDS);
+            control_sender.send(ControlMessage::Heartbeat);
         }
     });
+    buf.start_recv_loop(playback_receiver, control_receiver);
 
-    buf.start_recv_loop(midi_receiver, heartbeat_receiver);
+    let mut stop_the_show = false;
 
-    input.clear();
-    stdin().read_line(&mut input)?; // wait for next enter key press
+    while !stop_the_show {
+        input.clear();
+        stdin().read_line(&mut input)?; // wait for next enter key press
+        let command = input.trim();
+        if command == "next" {
+            control_sender_fg.send(ControlMessage::NewRun);
+        }
+        if command == "quit" {
+            stop_the_show = true;
+        }
+    }
 
     println!("Closing connection");
     Ok(())
