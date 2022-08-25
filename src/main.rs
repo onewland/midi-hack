@@ -1,9 +1,9 @@
-use std::{cmp::max, thread::JoinHandle};
 use std::io::stdin;
+use std::{cmp::max, thread::JoinHandle};
 // use std::process::Command;
 use std::error::Error;
-use std::sync::mpsc::{sync_channel, TryRecvError, RecvTimeoutError};
 use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{sync_channel, RecvTimeoutError, TryRecvError};
 
 use midir::{Ignore, MidiInput};
 
@@ -49,7 +49,7 @@ struct KeyBuffer {
     buf: Vec<KeyMessage>,
     most_recent_insert: u64,
     run_end_listeners: Vec<Box<dyn RunEndListener + Send>>,
-    heartbeat_count: usize
+    heartbeat_count: usize,
 }
 
 impl KeyBuffer {
@@ -58,7 +58,7 @@ impl KeyBuffer {
             buf: Vec::new(),
             most_recent_insert: 0,
             run_end_listeners: Vec::new(),
-            heartbeat_count: 0
+            heartbeat_count: 0,
         };
     }
 
@@ -69,16 +69,19 @@ impl KeyBuffer {
         self.buf.push(message);
         self.most_recent_insert = max(message.timestamp, self.most_recent_insert);
         self.print();
+        self.call_listeners();
     }
 
     fn end_run(&mut self) {
-        println!("calling listeners");
-        for listener in &self.run_end_listeners {
-            listener.as_ref().on_run_end(&self.buf);
-        }
         println!("new run");
         self.buf.clear();
         self.heartbeat_count = 0;
+    }
+
+    fn call_listeners(&mut self) {
+        for listener in &self.run_end_listeners {
+            listener.as_ref().on_run_end(&self.buf);
+        }
     }
 
     fn heartbeat(&mut self, elapsed: u64) {
@@ -104,7 +107,11 @@ impl KeyBuffer {
         println!("]")
     }
 
-    pub(crate) fn start_recv_loop(mut self, receiver: Receiver<KeyMessage>, heartbeat_receiver: Receiver<u64>) -> JoinHandle<()> {
+    pub(crate) fn start_recv_loop(
+        mut self,
+        receiver: Receiver<KeyMessage>,
+        heartbeat_receiver: Receiver<u64>,
+    ) -> JoinHandle<()> {
         std::thread::spawn(move || {
             loop {
                 match receiver.recv_timeout(std::time::Duration::from_nanos(100)) {
@@ -128,9 +135,15 @@ struct AscendingScaleNotifier {}
 
 impl RunEndListener for AscendingScaleNotifier {
     fn on_run_end(&self, buf: &Vec<KeyMessage>) {
-        println!("is major scale: {}", is_ascending_major_scale(&buf));
+        let major_scale_deltas = [2, 2, 1, 2, 2, 2, 1];
+        let harmonic_minor_scale_deltas = [2, 1, 2, 2, 1, 3, 1];
 
-        if is_ascending_major_scale(&buf) {
+        println!(
+            "is major scale: {}",
+            scale_matches_increments(&buf, major_scale_deltas)
+        );
+
+        if scale_matches_increments(&buf, major_scale_deltas) {
             sentry::capture_message(
                 format!(
                     "user played major scale starting at {}",
@@ -140,10 +153,21 @@ impl RunEndListener for AscendingScaleNotifier {
                 sentry::Level::Info,
             );
         }
+
+        if scale_matches_increments(&buf, harmonic_minor_scale_deltas) {
+            sentry::capture_message(
+                format!(
+                    "user played harmonic minor scale starting at {}",
+                    buf[0].readable_note()
+                )
+                .as_str(),
+                sentry::Level::Info,
+            );
+        }
     }
 }
 
-fn is_ascending_major_scale(key_events: &Vec<KeyMessage>) -> bool {
+fn scale_matches_increments(key_events: &Vec<KeyMessage>, proper_deltas: [u8; 7]) -> bool {
     // there should be [multiple of] 16 key-down then up events,
     // for 8 notes played and then lifted
     if key_events.len() < 16 || key_events.len() % 16 != 0 {
@@ -154,7 +178,6 @@ fn is_ascending_major_scale(key_events: &Vec<KeyMessage>) -> bool {
     // down followed by up of the same note with no overlap.
     //
     // whole [step] - whole - half - whole - whole - whole - half
-    let proper_deltas = vec![2, 2, 1, 2, 2, 2, 1];
     let mut pair_based_index = 0;
     let mut base_note = key_events[0].key;
 
@@ -226,7 +249,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     };
     println!("\nOpening connection");
     let _in_port_name = midi_in.port_name(in_port)?;
-    
+
     // Listener setup
     let (midi_sender, midi_receiver) = sync_channel(1);
     let (heartbeat_sender, heartbeat_receiver) = sync_channel(1);
@@ -259,7 +282,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     )?;
 
     std::thread::spawn(move || {
-        const HEARTBEAT_LAPSE_SECONDS : u64 = 1;
+        const HEARTBEAT_LAPSE_SECONDS: u64 = 1;
 
         loop {
             std::thread::sleep(std::time::Duration::from_secs(HEARTBEAT_LAPSE_SECONDS));
