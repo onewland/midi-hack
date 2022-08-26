@@ -1,6 +1,4 @@
-use core::slice;
 use std::io::stdin;
-use std::time;
 use std::{cmp::max, thread::JoinHandle};
 // use std::process::Command;
 use std::error::Error;
@@ -196,56 +194,72 @@ impl RunEndListener for AscendingScaleNotifier {
     }
 }
 
+fn is_minor_maj_7_chord(buf: &Vec<KeyMessage>) -> bool {
+    let mut major_minor_chord_c = vec!["C", "Eb", "G", "B"];
+    major_minor_chord_c.sort();
+
+    if buf.len() < 8 {
+        return false;
+    }
+
+    let key_downs: Vec<&KeyMessage> = buf
+        .iter()
+        .filter(|m| m.message_type == MidiMessageTypes::KeyDown)
+        .collect();
+
+    let timestamp_threshold = 30000;
+
+    if key_downs.len() >= 4 {
+        let mut start_run_index = 0;
+        while start_run_index < key_downs.len() {
+            let mut end_run_idx = start_run_index + 1;
+
+            while end_run_idx < key_downs.len()
+                && key_downs[end_run_idx].timestamp - key_downs[start_run_index].timestamp
+                    < timestamp_threshold
+            {
+                end_run_idx += 1;
+            }
+
+            let mut key_downs: Vec<&str> = key_downs
+                .get(start_run_index..end_run_idx)
+                .unwrap()
+                .iter()
+                .map(|m| m.note_name())
+                .collect();
+            key_downs.sort();
+
+            if key_downs == major_minor_chord_c {
+                return true;
+            } else {
+                trace!(
+                    "run indices = ({},{}), sorted_notes = {:?}, reference = {:?}",
+                    start_run_index, end_run_idx, key_downs, major_minor_chord_c
+                );
+            }
+            start_run_index += 1
+        }
+    }
+
+    return false;
+
+}
+
 struct MinorMajor7ChordListener;
 impl RunEndListener for MinorMajor7ChordListener {
     fn on_keypress(&self, buf: &Vec<KeyMessage>) -> bool {
-        let mut major_minor_chord_c = vec!["C", "Eb", "G", "B"];
-        major_minor_chord_c.sort();
-        
-        if buf.len() < 8 {
-            return false;
+        let result =  is_minor_maj_7_chord(buf);
+        if result {
+            sentry::capture_message(
+                format!(
+                    "user played minor-maj7 chord starting at {}",
+                    buf[0].readable_note()
+                )
+                .as_str(),
+                sentry::Level::Info,
+            );
         }
-
-        let key_downs: Vec<&KeyMessage> = buf
-            .iter()
-            .filter(|m| m.message_type == MidiMessageTypes::KeyDown)
-            .collect();
-
-        let timestamp_threshold = 30000;
-
-        if key_downs.len() >= 4 {
-            let mut start_run_index = 0;
-            while start_run_index < key_downs.len() {
-                let mut end_run_idx = start_run_index + 1;
-
-                while end_run_idx < key_downs.len()
-                    && key_downs[end_run_idx].timestamp - key_downs[start_run_index].timestamp
-                        < timestamp_threshold
-                {
-                    end_run_idx += 1;
-                }
-
-                let mut key_downs: Vec<&str> = key_downs
-                    .get(start_run_index..end_run_idx)
-                    .unwrap()
-                    .iter()
-                    .map(|m| m.note_name())
-                    .collect();
-                key_downs.sort();
-
-                if key_downs == major_minor_chord_c {
-                    return true;
-                } else {
-                    debug!(
-                        "run indices = ({},{}), sorted_notes = {:?}, reference = {:?}",
-                        start_run_index, end_run_idx, key_downs, major_minor_chord_c
-                    );
-                }
-                start_run_index += 1
-            }
-        }
-
-        return false;
+        return result
     }
 }
 
