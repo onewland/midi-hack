@@ -1,10 +1,13 @@
+use core::slice;
 use std::io::stdin;
-
+use std::time;
 use std::{cmp::max, thread::JoinHandle};
 // use std::process::Command;
 use std::error::Error;
+use std::sync::mpsc::sync_channel;
 use std::sync::mpsc::Receiver;
-use std::sync::mpsc::{sync_channel};
+
+use log::{debug, info, trace};
 
 use midir::{Ignore, MidiInput};
 
@@ -13,7 +16,7 @@ const KEY_UP: u8 = 128;
 const KEEP_ALIVE: u8 = 254;
 const TIME_KEEPING: u8 = 208;
 
-const HEARTBEATS_PER_AUTO_NEW_RUN: usize = 5;
+const HEARTBEATS_PER_AUTO_NEW_RUN: usize = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum MidiMessageTypes {
@@ -31,18 +34,21 @@ struct KeyMessage {
 
 enum ControlMessage {
     Heartbeat,
-    NewRun
+    NewRun,
+    Print,
 }
 
 impl KeyMessage {
     fn readable_note(&self) -> String {
+        return format!("{}{}", self.note_name(), self.key / 12);
+    }
+
+    fn note_name(&self) -> &str {
         let keys = [
             "A", "Bb", "B", "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab",
         ];
-        let str_note = keys
-            .get((usize::from(self.key) + NOTE_SEQ_OFFSET) % keys.len())
-            .unwrap();
-        return format!("{}{}", str_note, self.key / 12);
+        keys.get((usize::from(self.key) + NOTE_SEQ_OFFSET) % keys.len())
+            .unwrap()
     }
 
     fn print(&self) {
@@ -71,14 +77,14 @@ impl KeyBuffer {
     fn accept(&mut self, message: KeyMessage) {
         self.buf.push(message);
         self.most_recent_insert = max(message.timestamp, self.most_recent_insert);
-        self.print();
         self.call_listeners();
     }
 
     fn end_run(&mut self) {
-        println!("{}", "[new run]");
+        info!("{}", "[new run]");
         self.buf.clear();
         self.heartbeat_count = 0;
+        self.print()
     }
 
     fn call_listeners(&mut self) {
@@ -94,7 +100,8 @@ impl KeyBuffer {
     fn handle_control_message(&mut self, msg: ControlMessage) {
         match msg {
             ControlMessage::Heartbeat => self.heartbeat(),
-            ControlMessage::NewRun => self.end_run()
+            ControlMessage::NewRun => self.end_run(),
+            ControlMessage::Print => self.print(),
         }
     }
 
@@ -103,7 +110,6 @@ impl KeyBuffer {
             self.end_run()
         }
         self.heartbeat_count += 1;
-        self.print()
     }
 
     fn add_listener<T: 'static + RunEndListener + Send>(&mut self, listener: T) {
@@ -118,11 +124,11 @@ impl KeyBuffer {
         let mut last_msg: Option<KeyMessage> = None;
         self.buf.iter().for_each(|msg| {
             // print rest time since prior note
-            match last_msg { 
+            match last_msg {
                 None => (),
-                Some(prev) => print!("{} ", msg.timestamp - prev.timestamp)
+                Some(prev) => print!("{} ", msg.timestamp - prev.timestamp),
             }
-             // print note
+            // print note
             msg.print();
 
             last_msg = Some(*msg);
@@ -162,11 +168,6 @@ impl RunEndListener for AscendingScaleNotifier {
         let major_scale_deltas = [2, 2, 1, 2, 2, 2, 1];
         let harmonic_minor_scale_deltas = [2, 1, 2, 2, 1, 3, 1];
 
-        println!(
-            "is major scale: {}",
-            scale_matches_increments(&buf, major_scale_deltas)
-        );
-
         if scale_matches_increments(&buf, major_scale_deltas) {
             sentry::capture_message(
                 format!(
@@ -176,7 +177,7 @@ impl RunEndListener for AscendingScaleNotifier {
                 .as_str(),
                 sentry::Level::Info,
             );
-            return true
+            return true;
         }
 
         if scale_matches_increments(&buf, harmonic_minor_scale_deltas) {
@@ -188,18 +189,63 @@ impl RunEndListener for AscendingScaleNotifier {
                 .as_str(),
                 sentry::Level::Info,
             );
-            return true
+            return true;
         }
 
-        return false
+        return false;
     }
 }
 
 struct MinorMajor7ChordListener;
 impl RunEndListener for MinorMajor7ChordListener {
     fn on_keypress(&self, buf: &Vec<KeyMessage>) -> bool {
-        let major_minor_chord_deltas = [3,5,4];
-        return false
+        let mut major_minor_chord_c = vec!["C", "Eb", "G", "B"];
+        major_minor_chord_c.sort();
+        
+        if buf.len() < 8 {
+            return false;
+        }
+
+        let key_downs: Vec<&KeyMessage> = buf
+            .iter()
+            .filter(|m| m.message_type == MidiMessageTypes::KeyDown)
+            .collect();
+
+        let timestamp_threshold = 30000;
+
+        if key_downs.len() >= 4 {
+            let mut start_run_index = 0;
+            while start_run_index < key_downs.len() {
+                let mut end_run_idx = start_run_index + 1;
+
+                while end_run_idx < key_downs.len()
+                    && key_downs[end_run_idx].timestamp - key_downs[start_run_index].timestamp
+                        < timestamp_threshold
+                {
+                    end_run_idx += 1;
+                }
+
+                let mut key_downs: Vec<&str> = key_downs
+                    .get(start_run_index..end_run_idx)
+                    .unwrap()
+                    .iter()
+                    .map(|m| m.note_name())
+                    .collect();
+                key_downs.sort();
+
+                if key_downs == major_minor_chord_c {
+                    return true;
+                } else {
+                    debug!(
+                        "run indices = ({},{}), sorted_notes = {:?}, reference = {:?}",
+                        start_run_index, end_run_idx, key_downs, major_minor_chord_c
+                    );
+                }
+                start_run_index += 1
+            }
+        }
+
+        return false;
     }
 }
 
@@ -236,7 +282,7 @@ fn scale_matches_increments(key_events: &Vec<KeyMessage>, proper_deltas: [u8; 7]
         // if not on the first pair, make sure we're moving up, and by correct number of steps
         if pair_based_index > 0 {
             if e1.key <= base_note {
-                return false
+                return false;
             }
             if e1.key - base_note != proper_deltas[(pair_based_index % 8) - 1] {
                 return false;
@@ -337,10 +383,13 @@ fn run() -> Result<(), Box<dyn Error>> {
         input.clear();
         stdin().read_line(&mut input)?; // wait for next enter key press
         let command = input.trim();
-        if command == "next" {
+        if "print".starts_with(command) {
+            control_sender_fg.send(ControlMessage::Print);
+        }
+        if "next".starts_with(command) {
             control_sender_fg.send(ControlMessage::NewRun);
         }
-        if command == "quit" {
+        if "quit".starts_with(command) {
             stop_the_show = true;
         }
     }
@@ -350,6 +399,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 }
 
 fn main() {
+    env_logger::init();
     let _guard = sentry::init((
         "https://29e00247e7b64440822c2be63f3baa0f@o1066102.ingest.sentry.io/6678046",
         sentry::ClientOptions {
