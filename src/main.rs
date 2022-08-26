@@ -5,7 +5,7 @@ use std::error::Error;
 use std::sync::mpsc::sync_channel;
 use std::sync::mpsc::Receiver;
 
-use log::{debug, info, trace};
+use log::{info, trace};
 
 use midir::{Ignore, MidiInput};
 
@@ -20,7 +20,7 @@ const HEARTBEATS_PER_AUTO_NEW_RUN: usize = 100;
 enum MidiMessageTypes {
     KeyDown = 144,
     KeyUp = 128,
-    KeepAlive = 254,
+    // KeepAlive = 254,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -221,20 +221,23 @@ fn is_minor_maj_7_chord(buf: &Vec<KeyMessage>) -> bool {
                 end_run_idx += 1;
             }
 
-            let mut key_downs: Vec<&str> = key_downs
+            let mut key_down_notes: Vec<&str> = key_downs
                 .get(start_run_index..end_run_idx)
                 .unwrap()
                 .iter()
                 .map(|m| m.note_name())
                 .collect();
-            key_downs.sort();
+            key_down_notes.sort();
 
-            if key_downs == major_minor_chord_c {
+            if key_down_notes == major_minor_chord_c {
                 return true;
             } else {
                 trace!(
                     "run indices = ({},{}), sorted_notes = {:?}, reference = {:?}",
-                    start_run_index, end_run_idx, key_downs, major_minor_chord_c
+                    start_run_index,
+                    end_run_idx,
+                    key_down_notes,
+                    major_minor_chord_c
                 );
             }
             start_run_index += 1
@@ -242,13 +245,12 @@ fn is_minor_maj_7_chord(buf: &Vec<KeyMessage>) -> bool {
     }
 
     return false;
-
 }
 
 struct MinorMajor7ChordListener;
 impl RunEndListener for MinorMajor7ChordListener {
     fn on_keypress(&self, buf: &Vec<KeyMessage>) -> bool {
-        let result =  is_minor_maj_7_chord(buf);
+        let result = is_minor_maj_7_chord(buf);
         if result {
             sentry::capture_message(
                 format!(
@@ -259,7 +261,7 @@ impl RunEndListener for MinorMajor7ChordListener {
                 sentry::Level::Info,
             );
         }
-        return result
+        return result;
     }
 }
 
@@ -374,7 +376,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             if message.len() == 3 {
                 if message[0] == KEY_UP || message[0] == KEY_DOWN {
                     let parsed_message = build_key_message(stamp, message);
-                    playback_sender.send(parsed_message);
+                    playback_sender.send(parsed_message).unwrap();
                 }
             }
         },
@@ -386,7 +388,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 
         loop {
             std::thread::sleep(std::time::Duration::from_secs(HEARTBEAT_LAPSE_SECONDS));
-            control_sender.send(ControlMessage::Heartbeat);
+            control_sender.send(ControlMessage::Heartbeat).unwrap();
         }
     });
     buf.start_recv_loop(playback_receiver, control_receiver);
@@ -398,10 +400,10 @@ fn run() -> Result<(), Box<dyn Error>> {
         stdin().read_line(&mut input)?; // wait for next enter key press
         let command = input.trim();
         if "print".starts_with(command) {
-            control_sender_fg.send(ControlMessage::Print);
+            control_sender_fg.send(ControlMessage::Print).unwrap();
         }
         if "next".starts_with(command) {
-            control_sender_fg.send(ControlMessage::NewRun);
+            control_sender_fg.send(ControlMessage::NewRun).unwrap();
         }
         if "quit".starts_with(command) {
             stop_the_show = true;
