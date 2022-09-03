@@ -75,7 +75,7 @@ impl KeyBuffer {
     fn accept(&mut self, message: KeyMessage) {
         self.buf.push(message);
         self.most_recent_insert = max(message.timestamp, self.most_recent_insert);
-        self.call_listeners();
+        self.call_listeners(message);
     }
 
     fn end_run(&mut self) {
@@ -85,10 +85,10 @@ impl KeyBuffer {
         self.print()
     }
 
-    fn call_listeners(&mut self) {
+    fn call_listeners(&mut self, message: KeyMessage) {
         let mut hit_end = false;
         for listener in &self.run_end_listeners {
-            hit_end = hit_end || listener.as_ref().on_keypress(&self.buf);
+            hit_end = hit_end || listener.as_ref().on_keypress(&self.buf, message);
         }
         if hit_end {
             self.end_run()
@@ -157,20 +157,20 @@ impl KeyBuffer {
 trait RunEndListener {
     // RunEndListener listens on runs for the end, if it returns
     // true it has detected an end of a run, false means that it has not
-    fn on_keypress(&self, buf: &Vec<KeyMessage>) -> bool;
+    fn on_keypress(&self, key_log: &Vec<KeyMessage>, latest: KeyMessage) -> bool;
 }
 
 struct AscendingScaleNotifier;
 impl RunEndListener for AscendingScaleNotifier {
-    fn on_keypress(&self, buf: &Vec<KeyMessage>) -> bool {
+    fn on_keypress(&self, key_log: &Vec<KeyMessage>, latest: KeyMessage) -> bool {
         let major_scale_deltas = [2, 2, 1, 2, 2, 2, 1];
         let harmonic_minor_scale_deltas = [2, 1, 2, 2, 1, 3, 1];
 
-        if scale_matches_increments(&buf, major_scale_deltas) {
+        if scale_matches_increments(&key_log, major_scale_deltas) {
             sentry::capture_message(
                 format!(
                     "user played major scale starting at {}",
-                    buf[0].readable_note()
+                    key_log[0].readable_note()
                 )
                 .as_str(),
                 sentry::Level::Info,
@@ -178,11 +178,11 @@ impl RunEndListener for AscendingScaleNotifier {
             return true;
         }
 
-        if scale_matches_increments(&buf, harmonic_minor_scale_deltas) {
+        if scale_matches_increments(&key_log, harmonic_minor_scale_deltas) {
             sentry::capture_message(
                 format!(
                     "user played harmonic minor scale starting at {}",
-                    buf[0].readable_note()
+                    key_log[0].readable_note()
                 )
                 .as_str(),
                 sentry::Level::Info,
@@ -247,15 +247,17 @@ fn is_minor_maj_7_chord(buf: &Vec<KeyMessage>) -> bool {
     return false;
 }
 
-struct MinorMajor7ChordListener;
+struct MinorMajor7ChordListener {
+    // currently_pressed_keys: [(bool, u64)],
+}
 impl RunEndListener for MinorMajor7ChordListener {
-    fn on_keypress(&self, buf: &Vec<KeyMessage>) -> bool {
-        let result = is_minor_maj_7_chord(buf);
+    fn on_keypress(&self, key_log: &Vec<KeyMessage>, latest: KeyMessage) -> bool {
+        let result = is_minor_maj_7_chord(key_log);
         if result {
             sentry::capture_message(
                 format!(
                     "user played minor-maj7 chord starting at {}",
-                    buf[0].readable_note()
+                    key_log[0].readable_note()
                 )
                 .as_str(),
                 sentry::Level::Info,
