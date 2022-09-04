@@ -5,53 +5,18 @@ use std::error::Error;
 use std::sync::mpsc::sync_channel;
 use std::sync::mpsc::Receiver;
 
-use log::{info, trace};
+use log::info;
 
+use midi_hack::midi::{build_key_message, KeyMessage, KNOWN_MESSAGE_TYPES};
+use midi_hack::music::{is_minor_maj_7_chord, scale_matches_increments};
 use midir::{Ignore, MidiInput};
 
-const KEY_DOWN: u8 = 144;
-const KEY_UP: u8 = 128;
-const KEEP_ALIVE: u8 = 254;
-const TIME_KEEPING: u8 = 208;
-
 const HEARTBEATS_PER_AUTO_NEW_RUN: usize = 100;
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum MidiMessageTypes {
-    KeyDown = 144,
-    KeyUp = 128,
-    // KeepAlive = 254,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct KeyMessage {
-    timestamp: u64,
-    message_type: MidiMessageTypes,
-    key: u8,
-}
 
 enum ControlMessage {
     Heartbeat,
     NewRun,
     Print,
-}
-
-impl KeyMessage {
-    fn readable_note(&self) -> String {
-        return format!("{}{}", self.note_name(), self.key / 12);
-    }
-
-    fn note_name(&self) -> &str {
-        let keys = [
-            "A", "Bb", "B", "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab",
-        ];
-        keys.get((usize::from(self.key) + NOTE_SEQ_OFFSET) % keys.len())
-            .unwrap()
-    }
-
-    fn print(&self) {
-        print!("{:?}{} ", self.message_type, self.readable_note());
-    }
 }
 
 // #[derive(Clone)]
@@ -167,84 +132,23 @@ impl RunEndListener for AscendingScaleNotifier {
         let harmonic_minor_scale_deltas = [2, 1, 2, 2, 1, 3, 1];
 
         if scale_matches_increments(&key_log, major_scale_deltas) {
-            sentry::capture_message(
-                format!(
-                    "user played major scale starting at {}",
-                    key_log[0].readable_note()
-                )
-                .as_str(),
-                sentry::Level::Info,
+            log::info!(
+                "user played major scale starting at {}",
+                key_log[0].readable_note()
             );
             return true;
         }
 
         if scale_matches_increments(&key_log, harmonic_minor_scale_deltas) {
-            sentry::capture_message(
-                format!(
-                    "user played harmonic minor scale starting at {}",
-                    key_log[0].readable_note()
-                )
-                .as_str(),
-                sentry::Level::Info,
+            log::info!(
+                "user played harmonic minor scale starting at {}",
+                key_log[0].readable_note()
             );
             return true;
         }
 
         return false;
     }
-}
-
-fn is_minor_maj_7_chord(buf: &Vec<KeyMessage>) -> bool {
-    let mut major_minor_chord_c = vec!["C", "Eb", "G", "B"];
-    major_minor_chord_c.sort();
-
-    if buf.len() < 8 {
-        return false;
-    }
-
-    let key_downs: Vec<&KeyMessage> = buf
-        .iter()
-        .filter(|m| m.message_type == MidiMessageTypes::KeyDown)
-        .collect();
-
-    let timestamp_threshold = 30000;
-
-    if key_downs.len() >= 4 {
-        let mut start_run_index = 0;
-        while start_run_index < key_downs.len() {
-            let mut end_run_idx = start_run_index + 1;
-
-            while end_run_idx < key_downs.len()
-                && key_downs[end_run_idx].timestamp - key_downs[start_run_index].timestamp
-                    < timestamp_threshold
-            {
-                end_run_idx += 1;
-            }
-
-            let mut key_down_notes: Vec<&str> = key_downs
-                .get(start_run_index..end_run_idx)
-                .unwrap()
-                .iter()
-                .map(|m| m.note_name())
-                .collect();
-            key_down_notes.sort();
-
-            if key_down_notes == major_minor_chord_c {
-                return true;
-            } else {
-                trace!(
-                    "run indices = ({},{}), sorted_notes = {:?}, reference = {:?}",
-                    start_run_index,
-                    end_run_idx,
-                    key_down_notes,
-                    major_minor_chord_c
-                );
-            }
-            start_run_index += 1
-        }
-    }
-
-    return false;
 }
 
 struct MinorMajor7ChordListener {
@@ -254,81 +158,13 @@ impl RunEndListener for MinorMajor7ChordListener {
     fn on_keypress(&self, key_log: &Vec<KeyMessage>, latest: KeyMessage) -> bool {
         let result = is_minor_maj_7_chord(key_log);
         if result {
-            sentry::capture_message(
-                format!(
-                    "user played minor-maj7 chord starting at {}",
-                    key_log[0].readable_note()
-                )
-                .as_str(),
-                sentry::Level::Info,
+            log::info!(
+                "user played minor-maj7 chord starting at {}",
+                key_log[0].readable_note()
             );
         }
         return result;
     }
-}
-
-fn scale_matches_increments(key_events: &Vec<KeyMessage>, proper_deltas: [u8; 7]) -> bool {
-    // there should be [multiple of] 16 key-down then up events,
-    // for 8 notes played and then lifted
-    if key_events.len() < 16 || key_events.len() % 16 != 0 {
-        return false;
-    }
-
-    // an ascending major scale is the following sequence of key
-    // down followed by up of the same note with no overlap.
-    //
-    // whole [step] - whole - half - whole - whole - whole - half
-    let mut pair_based_index = 0;
-    let mut base_note = key_events[0].key;
-
-    // go pair by pair
-    while pair_based_index < key_events.len() / 2 {
-        let e1 = key_events[pair_based_index * 2];
-        let e2 = key_events[pair_based_index * 2 + 1];
-        // enforce down then up
-        if e1.message_type != MidiMessageTypes::KeyDown
-            || e2.message_type != MidiMessageTypes::KeyUp
-        {
-            return false;
-        }
-
-        // enforce same key down then up
-        if e1.key != e2.key {
-            return false;
-        }
-
-        // if not on the first pair, make sure we're moving up, and by correct number of steps
-        if pair_based_index > 0 {
-            if e1.key <= base_note {
-                return false;
-            }
-            if e1.key - base_note != proper_deltas[(pair_based_index % 8) - 1] {
-                return false;
-            }
-        }
-
-        // nothing eliminated this pair, updated the base note and move on
-        base_note = e1.key;
-        pair_based_index += 1
-    }
-
-    return true;
-}
-
-// real pianos start with a low A, the midi standard starts at C
-const NOTE_SEQ_OFFSET: usize = 3;
-
-fn build_key_message(timestamp: u64, unstructured_message: &[u8]) -> KeyMessage {
-    let m_type = match unstructured_message[0] {
-        KEY_DOWN => MidiMessageTypes::KeyDown,
-        KEY_UP => MidiMessageTypes::KeyUp,
-        _ => panic!("unknown message type"),
-    };
-    return KeyMessage {
-        timestamp: timestamp,
-        message_type: m_type,
-        key: unstructured_message[1],
-    };
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
@@ -357,7 +193,6 @@ fn run() -> Result<(), Box<dyn Error>> {
     let (control_sender, control_receiver) = sync_channel(1);
     let control_sender_fg = control_sender.clone();
 
-    let known_message_types = vec![KEY_DOWN, KEY_UP, KEEP_ALIVE, TIME_KEEPING];
     let mut buf = KeyBuffer::new();
     buf.add_listener(AscendingScaleNotifier {});
     buf.add_listener(MinorMajor7ChordListener {});
@@ -367,7 +202,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         in_port,
         "midir-read-input",
         move |stamp, message, _| {
-            if !known_message_types.contains(&message[0]) {
+            if !KNOWN_MESSAGE_TYPES.contains(&message[0]) {
                 println!(
                     "unknown message {}: {:?} (len = {})",
                     stamp,
@@ -376,7 +211,8 @@ fn run() -> Result<(), Box<dyn Error>> {
                 );
             }
             if message.len() == 3 {
-                if message[0] == KEY_UP || message[0] == KEY_DOWN {
+                if message[0] == midi_hack::midi::KEY_UP || message[0] == midi_hack::midi::KEY_DOWN
+                {
                     let parsed_message = build_key_message(stamp, message);
                     playback_sender.send(parsed_message).unwrap();
                 }
@@ -418,18 +254,14 @@ fn run() -> Result<(), Box<dyn Error>> {
 
 fn main() {
     env_logger::init();
-    let _guard = sentry::init((
-        "https://29e00247e7b64440822c2be63f3baa0f@o1066102.ingest.sentry.io/6678046",
-        sentry::ClientOptions {
-            release: sentry::release_name!(),
-            ..Default::default()
-        },
-    ));
+    // let _guard = sentry::init((
+    //     "https://29e00247e7b64440822c2be63f3baa0f@o1066102.ingest.sentry.io/6678046",
+    //     sentry::ClientOptions {
+    //         release: sentry::release_name!(),
+    //         ..Default::default()
+    //     },
+    // ));
 
-    // let _test = Command::new("say")
-    //     .arg("--rate=250")
-    //     .arg("rust program talking")
-    //     .output();
     match run() {
         Ok(_) => (),
         Err(err) => println!("Error: {}", err),
