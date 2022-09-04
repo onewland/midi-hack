@@ -122,27 +122,27 @@ impl KeyBuffer {
 trait RunEndListener {
     // RunEndListener listens on runs for the end, if it returns
     // true it has detected an end of a run, false means that it has not
-    fn on_keypress(&self, key_log: &Vec<KeyMessage>, latest: KeyMessage) -> bool;
+    fn on_keypress(&self, kmsg_log: &Vec<KeyMessage>, latest: KeyMessage) -> bool;
 }
 
 struct AscendingScaleNotifier;
 impl RunEndListener for AscendingScaleNotifier {
-    fn on_keypress(&self, key_log: &Vec<KeyMessage>, latest: KeyMessage) -> bool {
+    fn on_keypress(&self, kmsg_log: &Vec<KeyMessage>, _latest: KeyMessage) -> bool {
         let major_scale_deltas = [2, 2, 1, 2, 2, 2, 1];
         let harmonic_minor_scale_deltas = [2, 1, 2, 2, 1, 3, 1];
 
-        if scale_matches_increments(&key_log, major_scale_deltas) {
+        if scale_matches_increments(&kmsg_log, major_scale_deltas) {
             log::info!(
                 "user played major scale starting at {}",
-                key_log[0].readable_note()
+                kmsg_log[0].readable_note()
             );
             return true;
         }
 
-        if scale_matches_increments(&key_log, harmonic_minor_scale_deltas) {
+        if scale_matches_increments(&kmsg_log, harmonic_minor_scale_deltas) {
             log::info!(
                 "user played harmonic minor scale starting at {}",
-                key_log[0].readable_note()
+                kmsg_log[0].readable_note()
             );
             return true;
         }
@@ -155,12 +155,12 @@ struct MinorMajor7ChordListener {
     // currently_pressed_keys: [(bool, u64)],
 }
 impl RunEndListener for MinorMajor7ChordListener {
-    fn on_keypress(&self, key_log: &Vec<KeyMessage>, latest: KeyMessage) -> bool {
-        let result = is_minor_maj_7_chord(key_log);
+    fn on_keypress(&self, kmsg_log: &Vec<KeyMessage>, _latest: KeyMessage) -> bool {
+        let result = is_minor_maj_7_chord(kmsg_log);
         if result {
             log::info!(
                 "user played minor-maj7 chord starting at {}",
-                key_log[0].readable_note()
+                kmsg_log[0].readable_note()
             );
         }
         return result;
