@@ -9,6 +9,7 @@ use log::info;
 
 use midi_hack::midi::{build_key_message, KeyMessage, KNOWN_MESSAGE_TYPES};
 use midi_hack::music::{is_minor_maj_7_chord, scale_matches_increments};
+use midi_hack::practice_program::{self, PracticeProgram, CircleOfFourthsPracticeProgram};
 use midir::{Ignore, MidiInput};
 
 const HEARTBEATS_PER_AUTO_NEW_RUN: usize = 100;
@@ -25,6 +26,7 @@ struct KeyBuffer {
     most_recent_insert: u64,
     run_end_listeners: Vec<Box<dyn RunEndListener + Send>>,
     heartbeat_count: usize,
+    practice_program: Option<Box<dyn PracticeProgram + Send>>
 }
 
 impl KeyBuffer {
@@ -34,7 +36,12 @@ impl KeyBuffer {
             most_recent_insert: 0,
             run_end_listeners: Vec::new(),
             heartbeat_count: 0,
+            practice_program: None
         };
+    }
+
+    fn set_practice_program<T: 'static + PracticeProgram + Send>(&mut self, program: T) {
+        self.practice_program = Some(Box::new(program))
     }
 
     fn accept(&mut self, message: KeyMessage) {
@@ -196,6 +203,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let mut buf = KeyBuffer::new();
     buf.add_listener(AscendingScaleNotifier {});
     buf.add_listener(MinorMajor7ChordListener {});
+    buf.set_practice_program(CircleOfFourthsPracticeProgram::new());
 
     // Start the read loop
     let _conn_in = midi_in.connect(
