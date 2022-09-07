@@ -46,7 +46,7 @@ impl PracticeProgram for FreePlayPracticeProgram {
 
     fn on_keypress(&self, latest: KeyMessage) {
         log::trace!("received KeyMessage {}", latest.to_string());
-        let kmsg_log = self.key_db.ro_buffer();
+        let kmsg_log = self.key_db.flat_message_log();
         let major_scale_deltas = [2, 2, 1, 2, 2, 2, 1];
         let harmonic_minor_scale_deltas = [2, 1, 2, 2, 1, 3, 1];
 

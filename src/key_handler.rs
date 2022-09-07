@@ -19,7 +19,7 @@ impl KeyDb {
         }
     }
 
-    pub fn ro_buffer(&self) -> Vec<KeyMessage> {
+    pub fn flat_message_log(&self) -> Vec<KeyMessage> {
         self.buf.read().unwrap().to_vec()
     }
 

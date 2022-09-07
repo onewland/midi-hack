@@ -83,7 +83,7 @@ impl KeyLogAndDispatch {
             self.most_recent_insert
         );
         let mut last_msg: Option<KeyMessage> = None;
-        self.key_db.ro_buffer().iter().for_each(|msg| {
+        self.key_db.flat_message_log().iter().for_each(|msg| {
             // print rest time since prior note
             match last_msg {
                 None => (),
