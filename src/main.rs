@@ -158,7 +158,6 @@ fn run() -> Result<(), Box<dyn Error>> {
         program_receiver,
         key_reader_ro_copy,
     );
-    program.run();
 
     // Start the read loop
     let _conn_in = midi_in.connect(
@@ -194,6 +193,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     });
 
     key_reader.start_recv_loop(playback_receiver, control_receiver);
+    program.run();
 
     let mut stop_the_show = false;
 
