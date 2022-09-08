@@ -1,66 +1,61 @@
 use std::io::stdin;
+use std::sync::Arc;
 use std::{cmp::max, thread::JoinHandle};
 // use std::process::Command;
 use std::error::Error;
-use std::sync::mpsc::sync_channel;
 use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{sync_channel, SyncSender};
 
 use log::info;
 
+use midi_hack::key_handler::{ControlMessage, KeyDb};
 use midi_hack::midi::{build_key_message, KeyMessage, KNOWN_MESSAGE_TYPES};
-use midi_hack::music::{is_minor_maj_7_chord, scale_matches_increments};
-use midi_hack::practice_program::{self, PracticeProgram, CircleOfFourthsPracticeProgram};
+use midi_hack::practice_program::{FreePlayPracticeProgram, PracticeProgram};
 use midir::{Ignore, MidiInput};
 
 const HEARTBEATS_PER_AUTO_NEW_RUN: usize = 100;
 
-enum ControlMessage {
-    Heartbeat,
-    NewRun,
-    Print,
-}
-
 // #[derive(Clone)]
-struct KeyBuffer {
-    buf: Vec<KeyMessage>,
+struct KeyLogAndDispatch {
+    key_db: Arc<KeyDb>,
     most_recent_insert: u64,
-    run_end_listeners: Vec<Box<dyn RunEndListener + Send>>,
+    keypress_listeners: Vec<Box<dyn RunEndListener + Send>>,
     heartbeat_count: usize,
-    practice_program: Option<Box<dyn PracticeProgram + Send>>
+    program_sender: SyncSender<KeyMessage>,
 }
 
-impl KeyBuffer {
-    fn new() -> KeyBuffer {
-        return KeyBuffer {
-            buf: Vec::new(),
+impl KeyLogAndDispatch {
+    fn new(program_sender: SyncSender<KeyMessage>, key_db: Arc<KeyDb>) -> KeyLogAndDispatch {
+        return KeyLogAndDispatch {
+            key_db,
             most_recent_insert: 0,
-            run_end_listeners: Vec::new(),
+            keypress_listeners: Vec::new(),
             heartbeat_count: 0,
-            practice_program: None
+            program_sender,
         };
     }
 
-    fn set_practice_program<T: 'static + PracticeProgram + Send>(&mut self, program: T) {
-        self.practice_program = Some(Box::new(program))
-    }
-
     fn accept(&mut self, message: KeyMessage) {
-        self.buf.push(message);
+        self.key_db.push_msg(message);
         self.most_recent_insert = max(message.timestamp, self.most_recent_insert);
         self.call_listeners(message);
+        self.program_sender.send(message).unwrap();
     }
 
     fn end_run(&mut self) {
         info!("{}", "[new run]");
-        self.buf.clear();
+        self.key_db.clear();
         self.heartbeat_count = 0;
         self.print()
     }
 
     fn call_listeners(&mut self, message: KeyMessage) {
         let mut hit_end = false;
-        for listener in &self.run_end_listeners {
-            hit_end = hit_end || listener.as_ref().on_keypress(&self.buf, message);
+        for listener in &self.keypress_listeners {
+            hit_end = hit_end
+                || listener
+                    .as_ref()
+                    .on_keypress(Arc::clone(&self.key_db), message);
         }
         if hit_end {
             self.end_run()
@@ -82,17 +77,13 @@ impl KeyBuffer {
         self.heartbeat_count += 1;
     }
 
-    fn add_listener<T: 'static + RunEndListener + Send>(&mut self, listener: T) {
-        self.run_end_listeners.push(Box::new(listener))
-    }
-
     fn print(&self) {
         print!(
             "KeyBuffer [ most_recent_insert = {} ] [ keys = ",
             self.most_recent_insert
         );
         let mut last_msg: Option<KeyMessage> = None;
-        self.buf.iter().for_each(|msg| {
+        self.key_db.flat_message_log().iter().for_each(|msg| {
             // print rest time since prior note
             match last_msg {
                 None => (),
@@ -111,7 +102,7 @@ impl KeyBuffer {
         playback_receiver: Receiver<KeyMessage>,
         control_receiver: Receiver<ControlMessage>,
     ) -> JoinHandle<()> {
-        std::thread::spawn(move || {
+        return std::thread::spawn(move || {
             loop {
                 match playback_receiver.recv_timeout(std::time::Duration::from_nanos(100)) {
                     Ok(message) => self.accept(message),
@@ -122,56 +113,14 @@ impl KeyBuffer {
                     Err(_recv_timeout_error) => (), // this is fine
                 }
             }
-        })
+        });
     }
 }
 
 trait RunEndListener {
     // RunEndListener listens on runs for the end, if it returns
     // true it has detected an end of a run, false means that it has not
-    fn on_keypress(&self, kmsg_log: &Vec<KeyMessage>, latest: KeyMessage) -> bool;
-}
-
-struct AscendingScaleNotifier;
-impl RunEndListener for AscendingScaleNotifier {
-    fn on_keypress(&self, kmsg_log: &Vec<KeyMessage>, _latest: KeyMessage) -> bool {
-        let major_scale_deltas = [2, 2, 1, 2, 2, 2, 1];
-        let harmonic_minor_scale_deltas = [2, 1, 2, 2, 1, 3, 1];
-
-        if scale_matches_increments(&kmsg_log, major_scale_deltas) {
-            log::info!(
-                "user played major scale starting at {}",
-                kmsg_log[0].readable_note()
-            );
-            return true;
-        }
-
-        if scale_matches_increments(&kmsg_log, harmonic_minor_scale_deltas) {
-            log::info!(
-                "user played harmonic minor scale starting at {}",
-                kmsg_log[0].readable_note()
-            );
-            return true;
-        }
-
-        return false;
-    }
-}
-
-struct MinorMajor7ChordListener {
-    // currently_pressed_keys: [(bool, u64)],
-}
-impl RunEndListener for MinorMajor7ChordListener {
-    fn on_keypress(&self, kmsg_log: &Vec<KeyMessage>, _latest: KeyMessage) -> bool {
-        let result = is_minor_maj_7_chord(kmsg_log);
-        if result {
-            log::info!(
-                "user played minor-maj7 chord starting at {}",
-                kmsg_log[0].readable_note()
-            );
-        }
-        return result;
-    }
+    fn on_keypress(&self, kmsg_log: Arc<KeyDb>, latest: KeyMessage) -> bool;
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
@@ -198,12 +147,17 @@ fn run() -> Result<(), Box<dyn Error>> {
     // Listener setup
     let (playback_sender, playback_receiver) = sync_channel(1);
     let (control_sender, control_receiver) = sync_channel(1);
-    let control_sender_fg = control_sender.clone();
-
-    let mut buf = KeyBuffer::new();
-    buf.add_listener(AscendingScaleNotifier {});
-    buf.add_listener(MinorMajor7ChordListener {});
-    buf.set_practice_program(CircleOfFourthsPracticeProgram::new());
+    let (program_sender, program_receiver) = sync_channel(10);
+    let control_sender_tty = control_sender.clone();
+    let control_sender_practice_program = control_sender.clone();
+    let key_db = Arc::from(KeyDb::new());
+    let key_reader_ro_copy = Arc::clone(&key_db);
+    let key_reader = KeyLogAndDispatch::new(program_sender, key_db);
+    let program = FreePlayPracticeProgram::new(
+        control_sender_practice_program,
+        program_receiver,
+        key_reader_ro_copy,
+    );
 
     // Start the read loop
     let _conn_in = midi_in.connect(
@@ -237,7 +191,9 @@ fn run() -> Result<(), Box<dyn Error>> {
             control_sender.send(ControlMessage::Heartbeat).unwrap();
         }
     });
-    buf.start_recv_loop(playback_receiver, control_receiver);
+
+    key_reader.start_recv_loop(playback_receiver, control_receiver);
+    program.run();
 
     let mut stop_the_show = false;
 
@@ -246,10 +202,10 @@ fn run() -> Result<(), Box<dyn Error>> {
         stdin().read_line(&mut input)?; // wait for next enter key press
         let command = input.trim();
         if "print".starts_with(command) {
-            control_sender_fg.send(ControlMessage::Print).unwrap();
+            control_sender_tty.send(ControlMessage::Print).unwrap();
         }
         if "next".starts_with(command) {
-            control_sender_fg.send(ControlMessage::NewRun).unwrap();
+            control_sender_tty.send(ControlMessage::NewRun).unwrap();
         }
         if "quit".starts_with(command) {
             stop_the_show = true;

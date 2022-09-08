@@ -37,6 +37,10 @@ impl KeyMessage {
     pub fn print(&self) {
         print!("{:?}{} ", self.message_type, self.readable_note());
     }
+
+    pub fn to_string(&self) -> String {
+        format!("{:?}{} ", self.message_type, self.readable_note())
+    }
 }
 
 pub fn build_key_message(timestamp: u64, unstructured_message: &[u8]) -> KeyMessage {
