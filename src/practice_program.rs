@@ -19,8 +19,6 @@ pub trait PracticeProgram {
     fn get_state(&self) -> PracticeProgramState;
 
     fn run(self);
-
-    fn on_keypress(&self, latest: KeyMessage);
 }
 
 pub struct FreePlayPracticeProgram {
@@ -42,6 +40,21 @@ impl PracticeProgram for FreePlayPracticeProgram {
             let msg = self.key_receiver.recv().unwrap();
             self.on_keypress(msg);
         });
+    }
+}
+
+impl FreePlayPracticeProgram {
+    pub fn new(
+        ctrl_sender: SyncSender<ControlMessage>,
+        key_receiver: Receiver<KeyMessage>,
+        key_db: Arc<KeyDb>,
+    ) -> FreePlayPracticeProgram {
+        FreePlayPracticeProgram {
+            state: PracticeProgramState::INITIALIZING,
+            ctrl_sender,
+            key_receiver,
+            key_db,
+        }
     }
 
     fn on_keypress(&self, latest: KeyMessage) {
@@ -77,17 +90,76 @@ impl PracticeProgram for FreePlayPracticeProgram {
     }
 }
 
-impl FreePlayPracticeProgram {
+pub struct CircleOfFourthsPracticeProgram {
+    state: PracticeProgramState,
+    ctrl_sender: SyncSender<ControlMessage>,
+    key_receiver: Receiver<KeyMessage>,
+    key_db: Arc<KeyDb>,
+    current_key: String,
+}
+
+impl CircleOfFourthsPracticeProgram {
     pub fn new(
         ctrl_sender: SyncSender<ControlMessage>,
         key_receiver: Receiver<KeyMessage>,
         key_db: Arc<KeyDb>,
-    ) -> FreePlayPracticeProgram {
-        FreePlayPracticeProgram {
+    ) -> CircleOfFourthsPracticeProgram {
+        CircleOfFourthsPracticeProgram {
             state: PracticeProgramState::INITIALIZING,
             ctrl_sender,
             key_receiver,
             key_db,
+            current_key: String::from("C"),
         }
+    }
+
+    fn request_current_key(&mut self) {
+        self.state = PracticeProgramState::PROMPTING;
+
+        std::process::Command::new("say")
+            .arg("--voice=Moira")
+            .arg(format!("play {} mayjur", self.current_key))
+            .spawn()
+            .unwrap();
+
+        self.state = PracticeProgramState::LISTENING;
+    }
+
+    fn advance_current_key(&mut self) {
+        if self.current_key == "C" {
+            self.current_key = String::from("F");
+        }
+    }
+
+    fn on_keypress(&mut self, _latest: KeyMessage) {
+        let kmsg_log = self.key_db.flat_message_log();
+        let major_scale_deltas = [2, 2, 1, 2, 2, 2, 1];
+
+        if crate::music::scale_matches_increments(&kmsg_log, major_scale_deltas) {
+            log::info!(
+                "user played major scale starting at {}",
+                kmsg_log[0].readable_note()
+            );
+
+            self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
+
+            self.advance_current_key();
+            self.request_current_key();
+        }
+    }
+}
+
+impl PracticeProgram for CircleOfFourthsPracticeProgram {
+    fn get_state(&self) -> PracticeProgramState {
+        return self.state;
+    }
+
+    fn run(mut self) {
+        self.request_current_key();
+        self.state = PracticeProgramState::LISTENING;
+        std::thread::spawn(move || loop {
+            let msg = self.key_receiver.recv().unwrap();
+            self.on_keypress(msg);
+        });
     }
 }

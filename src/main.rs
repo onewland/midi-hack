@@ -1,3 +1,4 @@
+use std::env;
 use std::io::stdin;
 use std::sync::Arc;
 use std::{cmp::max, thread::JoinHandle};
@@ -6,11 +7,14 @@ use std::error::Error;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::{sync_channel, SyncSender};
 
+use clap::Parser;
 use log::info;
 
 use midi_hack::key_handler::{ControlMessage, KeyDb};
 use midi_hack::midi::{build_key_message, KeyMessage, KNOWN_MESSAGE_TYPES};
-use midi_hack::practice_program::{FreePlayPracticeProgram, PracticeProgram};
+use midi_hack::practice_program::{
+    CircleOfFourthsPracticeProgram, FreePlayPracticeProgram, PracticeProgram,
+};
 use midir::{Ignore, MidiInput};
 
 const HEARTBEATS_PER_AUTO_NEW_RUN: usize = 100;
@@ -123,7 +127,7 @@ trait RunEndListener {
     fn on_keypress(&self, kmsg_log: Arc<KeyDb>, latest: KeyMessage) -> bool;
 }
 
-fn run() -> Result<(), Box<dyn Error>> {
+fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     // Midi read setup
     let mut input = String::new();
     let mut midi_in = MidiInput::new("midir reading input")?;
@@ -153,11 +157,24 @@ fn run() -> Result<(), Box<dyn Error>> {
     let key_db = Arc::from(KeyDb::new());
     let key_reader_ro_copy = Arc::clone(&key_db);
     let key_reader = KeyLogAndDispatch::new(program_sender, key_db);
-    let program = FreePlayPracticeProgram::new(
-        control_sender_practice_program,
-        program_receiver,
-        key_reader_ro_copy,
-    );
+    match cli.practice_program.as_ref() {
+        "circle-of-fourths" => {
+            let program = CircleOfFourthsPracticeProgram::new(
+                control_sender_practice_program,
+                program_receiver,
+                key_reader_ro_copy,
+            );
+            program.run();
+        }
+        &_ => {
+            let program = FreePlayPracticeProgram::new(
+                control_sender_practice_program,
+                program_receiver,
+                key_reader_ro_copy,
+            );
+            program.run();
+        }
+    };
 
     // Start the read loop
     let _conn_in = midi_in.connect(
@@ -193,7 +210,6 @@ fn run() -> Result<(), Box<dyn Error>> {
     });
 
     key_reader.start_recv_loop(playback_receiver, control_receiver);
-    program.run();
 
     let mut stop_the_show = false;
 
@@ -216,17 +232,16 @@ fn run() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+#[derive(Parser)]
+struct Cli {
+    practice_program: String,
+}
+
 fn main() {
     env_logger::init();
-    // let _guard = sentry::init((
-    //     "https://29e00247e7b64440822c2be63f3baa0f@o1066102.ingest.sentry.io/6678046",
-    //     sentry::ClientOptions {
-    //         release: sentry::release_name!(),
-    //         ..Default::default()
-    //     },
-    // ));
+    let cli = Cli::parse();
 
-    match run() {
+    match run(cli) {
         Ok(_) => (),
         Err(err) => println!("Error: {}", err),
     }
