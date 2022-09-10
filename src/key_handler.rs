@@ -1,6 +1,6 @@
 use std::sync::RwLock;
 
-use crate::midi::KeyMessage;
+use crate::midi::{KeyMessage, MidiMessageTypes};
 
 pub enum ControlMessage {
     Heartbeat,
@@ -29,5 +29,17 @@ impl KeyDb {
 
     pub fn clear(&self) {
         self.buf.write().unwrap().clear()
+    }
+
+    pub fn last_n_key_ups_reversed(&self, n: usize) -> Vec<KeyMessage> {
+        return self.buf
+            .read()
+            .unwrap()
+            .iter()
+            .rev()
+            .filter(|k| k.message_type == MidiMessageTypes::KeyUp)
+            .take(n)
+            .map(|k| *k)
+            .collect::<Vec<KeyMessage>>();
     }
 }

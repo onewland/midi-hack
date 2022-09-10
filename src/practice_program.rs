@@ -3,7 +3,7 @@ use std::{
     sync::{mpsc::Receiver, Arc},
 };
 
-use log::info;
+use log::{info, trace};
 
 use crate::{key_handler::ControlMessage, key_handler::KeyDb, midi::KeyMessage};
 
@@ -61,22 +61,43 @@ impl FreePlayPracticeProgram {
         log::trace!("received KeyMessage {}", latest.to_string());
         let kmsg_log = self.key_db.flat_message_log();
         let major_scale_deltas = [2, 2, 1, 2, 2, 2, 1];
+        let major_scale_up_and_down_deltas = [2, 2, 1, 2, 2, 2, 1, -1, -2, -2, -2, -1, -2, -2];
+
         let harmonic_minor_scale_deltas = [2, 1, 2, 2, 1, 3, 1];
 
-        if crate::music::scale_matches_increments(&kmsg_log, major_scale_deltas) {
-            log::info!(
-                "user played major scale starting at {}",
-                kmsg_log[0].readable_note()
-            );
-            self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
+        let reverse_chron_key_events = &self.key_db.last_n_key_ups_reversed(15);
+        trace!("reverse_chron_key_events = {:?}", reverse_chron_key_events);
+        if reverse_chron_key_events.len() > 7 {
+            if let Some(msg) =
+                crate::music::detect_run(&reverse_chron_key_events[0..8], &major_scale_deltas)
+            {
+                log::info!(
+                    "user played ascending section of major scale starting at {}",
+                    msg.note_name()
+                );
+            }
+            if let Some(msg) = crate::music::detect_run(
+                &reverse_chron_key_events[0..8],
+                &harmonic_minor_scale_deltas,
+            ) {
+                log::info!(
+                    "user played harmonic minor scale starting at {}",
+                    msg.note_name()
+                );
+                self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
+            }
         }
-
-        if crate::music::scale_matches_increments(&kmsg_log, harmonic_minor_scale_deltas) {
-            log::info!(
-                "user played harmonic minor scale starting at {}",
-                kmsg_log[0].readable_note()
-            );
-            self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
+        if reverse_chron_key_events.len() > 14 {
+            if let Some(msg) = crate::music::detect_run(
+                &reverse_chron_key_events[0..15],
+                &major_scale_up_and_down_deltas,
+            ) {
+                log::info!(
+                    "user played up-and-down major scale starting at {}",
+                    msg.note_name()
+                );
+                self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
+            }
         }
 
         let result = crate::music::is_minor_maj_7_chord(&kmsg_log);
@@ -132,19 +153,31 @@ impl CircleOfFourthsPracticeProgram {
     }
 
     fn on_keypress(&mut self, _latest: KeyMessage) {
-        let kmsg_log = self.key_db.flat_message_log();
-        let major_scale_deltas = [2, 2, 1, 2, 2, 2, 1];
+        let reverse_chron_key_events = &self.key_db.last_n_key_ups_reversed(15);
+        let major_scale_up_and_down_deltas = [2, 2, 1, 2, 2, 2, 1, -1, -2, -2, -2, -1, -2, -2];
 
-        if crate::music::scale_matches_increments(&kmsg_log, major_scale_deltas) {
-            log::info!(
-                "user played major scale starting at {}",
-                kmsg_log[0].readable_note()
-            );
+        if reverse_chron_key_events.len() > 14 {
+            if let Some(msg) =
+                crate::music::detect_run(&reverse_chron_key_events, &major_scale_up_and_down_deltas)
+            {
+                log::info!(
+                    "user played major scale starting at {}",
+                    msg.readable_note()
+                );
 
-            self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
-
-            self.advance_current_key();
-            self.request_current_key();
+                if msg.note_name() == self.current_key {
+                    self.advance_current_key();
+                    self.request_current_key();
+                } else {
+                    std::process::Command::new("say")
+                        .arg("--voice=Moira")
+                        .arg("You've played a major scale but in the wrong key.")
+                        .spawn()
+                        .unwrap();
+                     self.request_current_key();
+                }
+                self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
+            }
         }
     }
 }
@@ -155,6 +188,7 @@ impl PracticeProgram for CircleOfFourthsPracticeProgram {
     }
 
     fn run(mut self) {
+        info!("starting CircleOfFourthsPracticeProgram");
         self.request_current_key();
         self.state = PracticeProgramState::LISTENING;
         std::thread::spawn(move || loop {
