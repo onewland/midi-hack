@@ -116,8 +116,23 @@ pub struct CircleOfFourthsPracticeProgram {
     ctrl_sender: SyncSender<ControlMessage>,
     key_receiver: Receiver<KeyMessage>,
     key_db: Arc<KeyDb>,
-    current_key: String,
+    current_key: usize,
 }
+
+const KEYS_IN_CIRCLE_OF_FOURTHS_ORDER : &'static [&'static str] = &[
+    "C",
+    "F",
+    "Bb",
+    "Eb",
+    "Ab",
+    "C#",
+    "F#",
+    "B",
+    "E",
+    "A",
+    "D",
+    "G",
+];
 
 impl CircleOfFourthsPracticeProgram {
     pub fn new(
@@ -130,25 +145,35 @@ impl CircleOfFourthsPracticeProgram {
             ctrl_sender,
             key_receiver,
             key_db,
-            current_key: String::from("C"),
+            current_key: 0,
         }
+    }
+
+    fn say(&self, text: String) {
+        let spawn = std::process::Command::new("say")
+            .arg("--voice=Moira")
+            .arg(text)
+            .spawn();
+        match spawn {
+            Ok(mut child) => child.wait().unwrap(),
+            Err(err) => panic!("{}", err),
+        };
     }
 
     fn request_current_key(&mut self) {
         self.state = PracticeProgramState::PROMPTING;
 
-        std::process::Command::new("say")
-            .arg("--voice=Moira")
-            .arg(format!("play {} mayjur", self.current_key))
-            .spawn()
-            .unwrap();
+        self.say(format!("play {} mayjur", KEYS_IN_CIRCLE_OF_FOURTHS_ORDER[self.current_key]));
 
         self.state = PracticeProgramState::LISTENING;
     }
 
     fn advance_current_key(&mut self) {
-        if self.current_key == "C" {
-            self.current_key = String::from("F");
+        if self.current_key + 1 < KEYS_IN_CIRCLE_OF_FOURTHS_ORDER.len() {
+            self.current_key += 1;
+        } else {
+            info!("program finished");
+            self.state = PracticeProgramState::FINISHED;
         }
     }
 
@@ -165,16 +190,12 @@ impl CircleOfFourthsPracticeProgram {
                     msg.readable_note()
                 );
 
-                if msg.note_name() == self.current_key {
+                if msg.note_name() == KEYS_IN_CIRCLE_OF_FOURTHS_ORDER[self.current_key] {
                     self.advance_current_key();
                     self.request_current_key();
                 } else {
-                    std::process::Command::new("say")
-                        .arg("--voice=Moira")
-                        .arg("You've played a major scale but in the wrong key.")
-                        .spawn()
-                        .unwrap();
-                     self.request_current_key();
+                    self.say("You've played a major scale but in the wrong key.".into());
+                    self.request_current_key();
                 }
                 self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
             }
