@@ -178,6 +178,10 @@ impl CircleOfFourthsPracticeProgram {
     }
 
     fn on_keypress(&mut self, _latest: KeyMessage) {
+        if self.state == PracticeProgramState::FINISHED {
+            return;
+        }
+
         let reverse_chron_key_events = &self.key_db.last_n_key_ups_reversed(15);
         let major_scale_up_and_down_deltas = [2, 2, 1, 2, 2, 2, 1, -1, -2, -2, -2, -1, -2, -2];
 
@@ -189,6 +193,7 @@ impl CircleOfFourthsPracticeProgram {
                     "user played major scale starting at {}",
                     msg.readable_note()
                 );
+                self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
 
                 if msg.note_name() == KEYS_IN_CIRCLE_OF_FOURTHS_ORDER[self.current_key] {
                     self.advance_current_key();
@@ -197,7 +202,6 @@ impl CircleOfFourthsPracticeProgram {
                     self.say("You've played a major scale but in the wrong key.".into());
                     self.request_current_key();
                 }
-                self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
             }
         }
     }

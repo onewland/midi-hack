@@ -150,7 +150,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
 
     // Listener setup
     let (playback_sender, playback_receiver) = sync_channel(1);
-    let (control_sender, control_receiver) = sync_channel(1);
+    let (control_sender, control_receiver) = sync_channel(10);
     let (program_sender, program_receiver) = sync_channel(10);
     let control_sender_tty = control_sender.clone();
     let control_sender_practice_program = control_sender.clone();
