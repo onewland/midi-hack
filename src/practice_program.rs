@@ -5,7 +5,9 @@ use std::{
 
 use log::{info, trace};
 
-use crate::{key_handler::ControlMessage, key_handler::KeyDb, midi::KeyMessage};
+use crate::key_handler::{ControlMessage, KeyDb};
+use crate::speech::get_pronunciation;
+use crate::{midi::KeyMessage, speech::say};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PracticeProgramState {
@@ -119,19 +121,8 @@ pub struct CircleOfFourthsPracticeProgram {
     current_key: usize,
 }
 
-const KEYS_IN_CIRCLE_OF_FOURTHS_ORDER : &'static [&'static str] = &[
-    "C",
-    "F",
-    "Bb",
-    "Eb",
-    "Ab",
-    "C#",
-    "F#",
-    "B",
-    "E",
-    "A",
-    "D",
-    "G",
+const KEYS_IN_CIRCLE_OF_FOURTHS_ORDER: &'static [&'static str] = &[
+    "C", "F", "Bb", "Eb", "Ab", "C#", "F#", "B", "E", "A", "D", "G",
 ];
 
 impl CircleOfFourthsPracticeProgram {
@@ -149,30 +140,22 @@ impl CircleOfFourthsPracticeProgram {
         }
     }
 
-    fn say(&self, text: String) {
-        let spawn = std::process::Command::new("say")
-            .arg("--voice=Moira")
-            .arg(text)
-            .spawn();
-        match spawn {
-            Ok(mut child) => child.wait().unwrap(),
-            Err(err) => panic!("{}", err),
-        };
-    }
-
     fn request_current_key(&mut self) {
-        self.state = PracticeProgramState::PROMPTING;
-
-        self.say(format!("play {} mayjur", KEYS_IN_CIRCLE_OF_FOURTHS_ORDER[self.current_key]));
-
-        self.state = PracticeProgramState::LISTENING;
+        if self.state != PracticeProgramState::FINISHED {
+            self.state = PracticeProgramState::PROMPTING;
+            say(format!(
+                "play {} mayjur",
+                get_pronunciation(KEYS_IN_CIRCLE_OF_FOURTHS_ORDER[self.current_key])
+            ));
+            self.state = PracticeProgramState::LISTENING;
+        }
     }
 
     fn advance_current_key(&mut self) {
         if self.current_key + 1 < KEYS_IN_CIRCLE_OF_FOURTHS_ORDER.len() {
             self.current_key += 1;
         } else {
-            info!("program finished");
+            say("you've finished the program. good job!".into());
             self.state = PracticeProgramState::FINISHED;
         }
     }
@@ -199,7 +182,7 @@ impl CircleOfFourthsPracticeProgram {
                     self.advance_current_key();
                     self.request_current_key();
                 } else {
-                    self.say("You've played a major scale but in the wrong key.".into());
+                    say("You've played a major scale but in the wrong key.".into());
                     self.request_current_key();
                 }
             }
