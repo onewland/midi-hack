@@ -154,7 +154,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     let (program_sender, program_receiver) = sync_channel(10);
     let control_sender_tty = control_sender.clone();
     let control_sender_practice_program = control_sender.clone();
-    let key_db = Arc::from(KeyDb::new());
+    let key_db = Arc::from(KeyDb::new(256));
     let key_reader_ro_copy = Arc::clone(&key_db);
     let key_reader = KeyLogAndDispatch::new(program_sender, key_db);
     match cli.practice_program.as_ref() {
