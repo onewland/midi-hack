@@ -11,7 +11,7 @@ use clap::Parser;
 use log::info;
 
 use midi_hack::key_handler::{ControlMessage, KeyDb};
-use midi_hack::midi::{build_key_message, KeyMessage, KNOWN_MESSAGE_TYPES};
+use midi_hack::midi::{KeyMessage, KNOWN_MESSAGE_TYPES};
 use midi_hack::practice_program::{
     CircleOfFourthsPracticeProgram, FreePlayPracticeProgram, PracticeProgram,
 };
@@ -192,7 +192,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
             if message.len() == 3 {
                 if message[0] == midi_hack::midi::KEY_UP || message[0] == midi_hack::midi::KEY_DOWN
                 {
-                    let parsed_message = build_key_message(stamp, message);
+                    let parsed_message = KeyMessage::new(stamp, message);
                     playback_sender.send(parsed_message).unwrap();
                 }
             }

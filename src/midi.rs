@@ -41,17 +41,17 @@ impl KeyMessage {
     pub fn to_string(&self) -> String {
         format!("{:?}{} ", self.message_type, self.readable_note())
     }
-}
 
-pub fn build_key_message(timestamp: u64, unstructured_message: &[u8]) -> KeyMessage {
-    let m_type = match unstructured_message[0] {
-        KEY_DOWN => MidiMessageTypes::KeyDown,
-        KEY_UP => MidiMessageTypes::KeyUp,
-        _ => panic!("unknown message type"),
-    };
-    return KeyMessage {
-        timestamp: timestamp,
-        message_type: m_type,
-        key: unstructured_message[1],
-    };
+    pub fn new(timestamp: u64, unstructured_message: &[u8]) -> KeyMessage {
+        let m_type = match unstructured_message[0] {
+            KEY_DOWN => MidiMessageTypes::KeyDown,
+            KEY_UP => MidiMessageTypes::KeyUp,
+            _ => panic!("unknown message type"),
+        };
+        return KeyMessage {
+            timestamp: timestamp,
+            message_type: m_type,
+            key: unstructured_message[1],
+        };
+    }
 }
