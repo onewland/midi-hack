@@ -32,12 +32,13 @@ impl KeyDb {
     }
 
     pub fn last_n_key_ups_reversed(&self, n: usize) -> Vec<KeyMessage> {
-        return self.buf
+        return self
+            .buf
             .read()
             .unwrap()
             .iter()
             .rev()
-            .filter(|k| k.message_type == MidiMessageTypes::KeyUp)
+            .filter(|k| k.message_type == MidiMessageTypes::NoteOff)
             .take(n)
             .map(|k| *k)
             .collect::<Vec<KeyMessage>>();

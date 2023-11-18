@@ -205,3 +205,46 @@ impl PracticeProgram for CircleOfFourthsPracticeProgram {
         });
     }
 }
+
+pub struct EarTrainingPracticeProgram {
+    state: PracticeProgramState,
+    ctrl_sender: SyncSender<ControlMessage>,
+    key_receiver: Receiver<KeyMessage>,
+    key_db: Arc<KeyDb>,
+}
+
+impl EarTrainingPracticeProgram {
+    pub fn new(
+        ctrl_sender: SyncSender<ControlMessage>,
+        key_receiver: Receiver<KeyMessage>,
+        key_db: Arc<KeyDb>,
+    ) -> EarTrainingPracticeProgram {
+        EarTrainingPracticeProgram {
+            state: PracticeProgramState::INITIALIZING,
+            ctrl_sender,
+            key_receiver,
+            key_db,
+        }
+    }
+
+    fn on_keypress(&mut self, _latest: KeyMessage) {
+        if self.state == PracticeProgramState::FINISHED {
+            return;
+        }
+    }
+}
+
+impl PracticeProgram for EarTrainingPracticeProgram {
+    fn get_state(&self) -> PracticeProgramState {
+        return self.state;
+    }
+
+    fn run(mut self) {
+        info!("starting EarTrainingPracticeProgram");
+        self.state = PracticeProgramState::LISTENING;
+        std::thread::spawn(move || loop {
+            let msg = self.key_receiver.recv().unwrap();
+            self.on_keypress(msg);
+        });
+    }
+}

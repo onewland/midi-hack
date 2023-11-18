@@ -1,14 +1,14 @@
 #[derive(Clone, Copy, Debug)]
 pub struct KeyMessage {
-    pub timestamp: u64,
+    pub timestamp: u64, // TODO make this an option for user-generated messages
     pub message_type: MidiMessageTypes,
     pub key: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MidiMessageTypes {
-    KeyDown = 144,
-    KeyUp = 128,
+    NoteOn = 144,
+    NoteOff = 128,
     // KeepAlive = 254,
 }
 
@@ -17,6 +17,7 @@ pub const KEY_UP: u8 = 128;
 pub const KEEP_ALIVE: u8 = 254;
 const TIME_KEEPING: u8 = 208;
 pub static KNOWN_MESSAGE_TYPES: &'static [u8] = &[KEY_DOWN, KEY_UP, KEEP_ALIVE, TIME_KEEPING];
+const VELOCITY: u8 = 0x64;
 
 // real pianos start with a low A, the midi standard starts at C
 const NOTE_SEQ_OFFSET: usize = 3;
@@ -42,10 +43,14 @@ impl KeyMessage {
         format!("{:?}{} ", self.message_type, self.readable_note())
     }
 
-    pub fn new(timestamp: u64, unstructured_message: &[u8]) -> KeyMessage {
+    pub fn encode(&self) -> [u8; 3] {
+        return [self.message_type as u8, self.key, VELOCITY];
+    }
+
+    pub fn from_midi(timestamp: u64, unstructured_message: &[u8]) -> KeyMessage {
         let m_type = match unstructured_message[0] {
-            KEY_DOWN => MidiMessageTypes::KeyDown,
-            KEY_UP => MidiMessageTypes::KeyUp,
+            KEY_DOWN => MidiMessageTypes::NoteOn,
+            KEY_UP => MidiMessageTypes::NoteOff,
             _ => panic!("unknown message type"),
         };
         return KeyMessage {
@@ -55,3 +60,15 @@ impl KeyMessage {
         };
     }
 }
+
+pub const C4_DOWN: KeyMessage = KeyMessage {
+    timestamp: 0,
+    message_type: MidiMessageTypes::NoteOn,
+    key: 60,
+};
+
+pub const C4_UP: KeyMessage = KeyMessage {
+    timestamp: 0,
+    message_type: MidiMessageTypes::NoteOff,
+    key: 60,
+};

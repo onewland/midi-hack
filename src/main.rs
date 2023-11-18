@@ -1,21 +1,21 @@
-use std::env;
 use std::io::stdin;
 use std::sync::Arc;
 use std::{cmp::max, thread::JoinHandle};
+use std::{thread, time};
 // use std::process::Command;
 use std::error::Error;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::{sync_channel, SyncSender};
 
 use clap::Parser;
-use log::info;
+use log::{debug, info, trace};
 
 use midi_hack::key_handler::{ControlMessage, KeyDb};
-use midi_hack::midi::{KeyMessage, KNOWN_MESSAGE_TYPES};
+use midi_hack::midi::{KeyMessage, C4_DOWN, C4_UP, KNOWN_MESSAGE_TYPES};
 use midi_hack::practice_program::{
     CircleOfFourthsPracticeProgram, FreePlayPracticeProgram, PracticeProgram,
 };
-use midir::{Ignore, MidiInput};
+use midir::{Ignore, MidiInput, MidiOutput};
 
 const HEARTBEATS_PER_AUTO_NEW_RUN: usize = 100;
 
@@ -132,21 +132,49 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     let mut input = String::new();
     let mut midi_in = MidiInput::new("midir reading input")?;
     midi_in.ignore(Ignore::None);
+    let midi_out: MidiOutput = MidiOutput::new("midir_controller_client")?;
+    let out_ports = midi_out.ports();
+    debug!("{} ports in midi_out", midi_out.port_count());
     let in_ports = midi_in.ports();
     let in_port = match in_ports.len() {
         0 => panic!("no device found"),
         len => {
             assert!(len > cli.midi_device_port);
-            let device_name = midi_in.port_name(&in_ports[0]).unwrap();
+            let device_name = midi_in.port_name(&in_ports[cli.midi_device_port]).unwrap();
             println!(
                 "Loading input port {}, friendly name: \"{}\"",
                 cli.midi_device_port, device_name
             );
-            sentry::configure_scope(|scope| scope.set_tag("midi_device", device_name));
+            sentry::configure_scope(|scope| scope.set_tag("midi_in_device", device_name));
             &in_ports[0]
         }
     };
-    println!("\nOpening connection");
+    let out_port = match in_ports.len() {
+        0 => panic!("no device found"),
+        len => {
+            assert!(len > cli.midi_device_port);
+            let device_name = midi_out
+                .port_name(&out_ports[cli.midi_device_port])
+                .unwrap();
+            println!(
+                "Loading output port {}, friendly name: \"{}\"",
+                cli.midi_device_port, device_name
+            );
+            sentry::configure_scope(|scope| scope.set_tag("midi_out_device", device_name));
+            &out_ports[0]
+        }
+    };
+    let mut connect = midi_out.connect(out_port, "midir-write-output")?;
+
+    info!("output connection established");
+
+    let encode = C4_DOWN.encode();
+    connect.send(&encode).unwrap();
+    thread::sleep(time::Duration::from_millis(500));
+    let encode2 = C4_UP.encode();
+    connect.send(&encode2).unwrap();
+    trace!("keyup sent {:?}, {:?}", encode, encode2);
+
     // let _in_port_name = midi_in.port_name(in_port)?;
 
     // Listener setup
@@ -193,7 +221,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
             if message.len() == 3 {
                 if message[0] == midi_hack::midi::KEY_UP || message[0] == midi_hack::midi::KEY_DOWN
                 {
-                    let parsed_message = KeyMessage::new(stamp, message);
+                    let parsed_message = KeyMessage::from_midi(stamp, message);
                     playback_sender.send(parsed_message).unwrap();
                 }
             }
