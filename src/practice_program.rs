@@ -4,6 +4,7 @@ use std::{
 };
 
 use log::{info, trace};
+use rand::Rng;
 
 use crate::key_handler::{ControlMessage, KeyDb};
 use crate::speech::get_pronunciation;
@@ -223,14 +224,15 @@ impl EarTrainingPracticeProgram {
         key_receiver: Receiver<KeyMessage>,
         key_db: Arc<KeyDb>,
     ) -> EarTrainingPracticeProgram {
+        let key1 = rand::thread_rng().gen_range(60..=72);
         EarTrainingPracticeProgram {
             state: PracticeProgramState::INITIALIZING,
             midi_out_sender,
             ctrl_sender,
             key_receiver,
             key_db,
-            first_key: 60,
-            second_key: 64,
+            first_key: key1,
+            second_key: rand::thread_rng().gen_range(key1..=72),
         }
     }
 
