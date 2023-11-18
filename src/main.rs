@@ -135,18 +135,19 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     let in_ports = midi_in.ports();
     let in_port = match in_ports.len() {
         0 => panic!("no device found"),
-        1 => {
+        len => {
+            assert!(len > cli.midi_device_port);
             let device_name = midi_in.port_name(&in_ports[0]).unwrap();
-            println!("Choosing the only available input port: {}", device_name);
+            println!(
+                "Loading input port {}, friendly name: \"{}\"",
+                cli.midi_device_port, device_name
+            );
             sentry::configure_scope(|scope| scope.set_tag("midi_device", device_name));
             &in_ports[0]
         }
-        _ => {
-            panic!("don't know how to deal with multiple devices")
-        }
     };
     println!("\nOpening connection");
-    let _in_port_name = midi_in.port_name(in_port)?;
+    // let _in_port_name = midi_in.port_name(in_port)?;
 
     // Listener setup
     let (playback_sender, playback_receiver) = sync_channel(1);
@@ -234,7 +235,12 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
 
 #[derive(Parser)]
 struct Cli {
+    /// Name of the practice program to play
     practice_program: String,
+
+    /// Midi device port (indexed by 0)
+    #[arg(short, long, default_value_t = 0)]
+    midi_device_port: usize,
 }
 
 fn main() {
