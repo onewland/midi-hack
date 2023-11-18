@@ -1,7 +1,9 @@
 use std::io::stdin;
 use std::sync::Arc;
+
+use std::time::Duration;
 use std::{cmp::max, thread::JoinHandle};
-use std::{thread, time};
+
 // use std::process::Command;
 use std::error::Error;
 use std::sync::mpsc::Receiver;
@@ -11,9 +13,10 @@ use clap::Parser;
 use log::{debug, info, trace};
 
 use midi_hack::key_handler::{ControlMessage, KeyDb};
-use midi_hack::midi::{KeyMessage, C4_DOWN, C4_UP, KNOWN_MESSAGE_TYPES};
+use midi_hack::midi::{KeyMessage, KNOWN_MESSAGE_TYPES};
 use midi_hack::practice_program::{
-    CircleOfFourthsPracticeProgram, FreePlayPracticeProgram, PracticeProgram,
+    CircleOfFourthsPracticeProgram, EarTrainingPracticeProgram, FreePlayPracticeProgram,
+    PracticeProgram,
 };
 use midir::{Ignore, MidiInput, MidiOutput};
 
@@ -164,23 +167,16 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
             &out_ports[0]
         }
     };
-    let mut connect = midi_out.connect(out_port, "midir-write-output")?;
+    let mut midi_out_connection = midi_out.connect(out_port, "midir-write-output")?;
 
     info!("output connection established");
-
-    let encode = C4_DOWN.encode();
-    connect.send(&encode).unwrap();
-    thread::sleep(time::Duration::from_millis(500));
-    let encode2 = C4_UP.encode();
-    connect.send(&encode2).unwrap();
-    trace!("keyup sent {:?}, {:?}", encode, encode2);
-
-    // let _in_port_name = midi_in.port_name(in_port)?;
 
     // Listener setup
     let (playback_sender, playback_receiver) = sync_channel(1);
     let (control_sender, control_receiver) = sync_channel(10);
     let (program_sender, program_receiver) = sync_channel(10);
+    let (midi_out_sender, midi_out_receiver) = sync_channel::<KeyMessage>(1);
+
     let control_sender_tty = control_sender.clone();
     let control_sender_practice_program = control_sender.clone();
     let key_db = Arc::from(KeyDb::new());
@@ -190,6 +186,15 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
         "circle-of-fourths" => {
             let program = CircleOfFourthsPracticeProgram::new(
                 control_sender_practice_program,
+                program_receiver,
+                key_reader_ro_copy,
+            );
+            program.run();
+        }
+        "ear-training" => {
+            let program = EarTrainingPracticeProgram::new(
+                control_sender_practice_program,
+                midi_out_sender,
                 program_receiver,
                 key_reader_ro_copy,
             );
@@ -239,6 +244,21 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     });
 
     key_reader.start_recv_loop(playback_receiver, control_receiver);
+
+    std::thread::spawn(move || {
+        const WAIT_DELAY: Duration = std::time::Duration::from_millis(1);
+        info!("midi out receive loop started");
+        loop {
+            match midi_out_receiver.recv_timeout(WAIT_DELAY) {
+                Ok(message) => {
+                    trace!("emitting {:?}", message);
+                    midi_out_connection.send(&message.encode())
+                }
+                Err(_recv_timeout_error) => Ok(()), // this is fine
+            }
+            .unwrap();
+        }
+    });
 
     let mut stop_the_show = false;
 

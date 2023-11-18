@@ -5,9 +5,12 @@ use std::{
 
 use log::{info, trace};
 
-use crate::key_handler::{ControlMessage, KeyDb};
-use crate::speech::get_pronunciation;
+use crate::{
+    key_handler::{ControlMessage, KeyDb},
+    midi::{C4_DOWN, F4_DOWN, F4_UP},
+};
 use crate::{midi::KeyMessage, speech::say};
+use crate::{midi::C4_UP, speech::get_pronunciation};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PracticeProgramState {
@@ -209,6 +212,7 @@ impl PracticeProgram for CircleOfFourthsPracticeProgram {
 pub struct EarTrainingPracticeProgram {
     state: PracticeProgramState,
     ctrl_sender: SyncSender<ControlMessage>,
+    midi_out_sender: SyncSender<KeyMessage>,
     key_receiver: Receiver<KeyMessage>,
     key_db: Arc<KeyDb>,
 }
@@ -216,11 +220,13 @@ pub struct EarTrainingPracticeProgram {
 impl EarTrainingPracticeProgram {
     pub fn new(
         ctrl_sender: SyncSender<ControlMessage>,
+        midi_out_sender: SyncSender<KeyMessage>,
         key_receiver: Receiver<KeyMessage>,
         key_db: Arc<KeyDb>,
     ) -> EarTrainingPracticeProgram {
         EarTrainingPracticeProgram {
             state: PracticeProgramState::INITIALIZING,
+            midi_out_sender,
             ctrl_sender,
             key_receiver,
             key_db,
@@ -242,9 +248,26 @@ impl PracticeProgram for EarTrainingPracticeProgram {
     fn run(mut self) {
         info!("starting EarTrainingPracticeProgram");
         self.state = PracticeProgramState::LISTENING;
-        std::thread::spawn(move || loop {
-            let msg = self.key_receiver.recv().unwrap();
-            self.on_keypress(msg);
+
+        std::thread::spawn(move || {
+            say("starting ear training".into());
+
+            // await channel readiness
+            loop {
+                match self.midi_out_sender.try_send(C4_DOWN) {
+                    Ok(_) => break,
+                    Err(_) => std::thread::sleep(std::time::Duration::from_nanos(100)),
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+            self.midi_out_sender.send(C4_UP).unwrap();
+            self.midi_out_sender.send(F4_DOWN).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+            self.midi_out_sender.send(F4_UP).unwrap();
+            loop {
+                let msg = self.key_receiver.recv().unwrap();
+                self.on_keypress(msg);
+            }
         });
     }
 }

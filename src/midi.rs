@@ -72,3 +72,15 @@ pub const C4_UP: KeyMessage = KeyMessage {
     message_type: MidiMessageTypes::NoteOff,
     key: 60,
 };
+
+pub const F4_DOWN: KeyMessage = KeyMessage {
+    timestamp: 0,
+    message_type: MidiMessageTypes::NoteOn,
+    key: 65,
+};
+
+pub const F4_UP: KeyMessage = KeyMessage {
+    timestamp: 0,
+    message_type: MidiMessageTypes::NoteOff,
+    key: 65,
+};
