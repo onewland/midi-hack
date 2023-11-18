@@ -5,12 +5,9 @@ use std::{
 
 use log::{info, trace};
 
-use crate::{
-    key_handler::{ControlMessage, KeyDb},
-    midi::{C4_DOWN, F4_DOWN, F4_UP},
-};
+use crate::key_handler::{ControlMessage, KeyDb};
+use crate::speech::get_pronunciation;
 use crate::{midi::KeyMessage, speech::say};
-use crate::{midi::C4_UP, speech::get_pronunciation};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PracticeProgramState {
@@ -215,6 +212,8 @@ pub struct EarTrainingPracticeProgram {
     midi_out_sender: SyncSender<KeyMessage>,
     key_receiver: Receiver<KeyMessage>,
     key_db: Arc<KeyDb>,
+    first_key: u8,
+    second_key: u8,
 }
 
 impl EarTrainingPracticeProgram {
@@ -230,6 +229,8 @@ impl EarTrainingPracticeProgram {
             ctrl_sender,
             key_receiver,
             key_db,
+            first_key: 60,
+            second_key: 64,
         }
     }
 
@@ -237,6 +238,35 @@ impl EarTrainingPracticeProgram {
         if self.state == PracticeProgramState::FINISHED {
             return;
         }
+
+        let last_key = self.key_db.last_n_key_ups_reversed(1);
+        if !last_key.is_empty() {
+            if last_key[0].key == self.first_key && _latest.key == self.second_key {
+                say("you got it".into());
+            }
+        }
+    }
+
+    fn play_note(&self, key: u8, duration_millis: u64) {
+        let down_message_one = KeyMessage {
+            timestamp: 0,
+            message_type: crate::midi::MidiMessageTypes::NoteOn,
+            key: key,
+        };
+        let up_message_one = KeyMessage {
+            timestamp: 0,
+            message_type: crate::midi::MidiMessageTypes::NoteOff,
+            key: key,
+        };
+        // await channel readiness
+        loop {
+            match self.midi_out_sender.try_send(down_message_one) {
+                Ok(_) => break,
+                Err(_) => std::thread::sleep(std::time::Duration::from_nanos(100)),
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(duration_millis));
+        self.midi_out_sender.send(up_message_one).unwrap();
     }
 }
 
@@ -252,18 +282,9 @@ impl PracticeProgram for EarTrainingPracticeProgram {
         std::thread::spawn(move || {
             say("starting ear training".into());
 
-            // await channel readiness
-            loop {
-                match self.midi_out_sender.try_send(C4_DOWN) {
-                    Ok(_) => break,
-                    Err(_) => std::thread::sleep(std::time::Duration::from_nanos(100)),
-                }
-            }
-            std::thread::sleep(std::time::Duration::from_millis(1000));
-            self.midi_out_sender.send(C4_UP).unwrap();
-            self.midi_out_sender.send(F4_DOWN).unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(1000));
-            self.midi_out_sender.send(F4_UP).unwrap();
+            self.play_note(self.first_key, 1000);
+            self.play_note(self.second_key, 1000);
+
             loop {
                 let msg = self.key_receiver.recv().unwrap();
                 self.on_keypress(msg);

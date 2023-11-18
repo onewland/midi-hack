@@ -112,6 +112,12 @@ Assign key messages to hands based on a standard person's max octave reach.
 Play a note sequence or chord using the device of the musician, and have them
 try to mimic. Maybe provide hints in between.
 
+- create an ear training practice program
+- (hack) output a static note to midi from the new program
+- remove hack, wire in midi out to practice program
+- pick two notes randomly, send as broken or closed chord
+
+
 ### Tempo detection
 Based on a run of notes, approximately what BPM is the player playing at? Where
 are they deviating from the beat?
