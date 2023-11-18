@@ -9,30 +9,37 @@ pub enum ControlMessage {
 }
 
 pub struct KeyDb {
-    buf: RwLock<Vec<KeyMessage>>,
+    holds: RwLock<Vec<Vec<u8>>>,
+    linear_buf: RwLock<Vec<KeyMessage>>,
+    base_time: u8,
 }
 
 impl KeyDb {
-    pub fn new() -> KeyDb {
+    pub fn new(bucket_count: usize) -> KeyDb {
         KeyDb {
-            buf: RwLock::from(Vec::new()),
+            linear_buf: RwLock::from(Vec::new()),
+            holds: RwLock::from(Vec::with_capacity(bucket_count)),
+            base_time: 0,
         }
     }
 
     pub fn flat_message_log(&self) -> Vec<KeyMessage> {
-        self.buf.read().unwrap().to_vec()
+        self.linear_buf.read().unwrap().to_vec()
     }
 
     pub fn push_msg(&self, key: KeyMessage) {
-        self.buf.write().unwrap().push(key)
+        self.linear_buf.write().unwrap().push(key)
     }
 
     pub fn clear(&self) {
-        self.buf.write().unwrap().clear()
+        self.linear_buf.write().unwrap().clear()
     }
 
+    fn holds_update(&self, msg: KeyMessage) {}
+
     pub fn last_n_key_ups_reversed(&self, n: usize) -> Vec<KeyMessage> {
-        return self.buf
+        return self
+            .linear_buf
             .read()
             .unwrap()
             .iter()
