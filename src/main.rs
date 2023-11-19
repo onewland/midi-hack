@@ -246,7 +246,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     key_reader.start_recv_loop(playback_receiver, control_receiver);
 
     std::thread::spawn(move || {
-        const WAIT_DELAY: Duration = std::time::Duration::from_millis(1);
+        const WAIT_DELAY: Duration = std::time::Duration::from_secs(1);
         info!("midi out receive loop started");
         loop {
             match midi_out_receiver.recv_timeout(WAIT_DELAY) {

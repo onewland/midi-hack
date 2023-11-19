@@ -280,7 +280,7 @@ impl EarTrainingPracticeProgram {
         loop {
             match self.midi_out_sender.try_send(down) {
                 Ok(_) => break,
-                Err(_) => std::thread::sleep(std::time::Duration::from_nanos(100)),
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
             }
         }
         std::thread::sleep(std::time::Duration::from_millis(duration_millis));
