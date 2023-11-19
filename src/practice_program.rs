@@ -217,6 +217,8 @@ pub struct EarTrainingPracticeProgram {
     second_key: u8,
 }
 
+const SOS_KEY: u8 = 21;
+
 impl EarTrainingPracticeProgram {
     pub fn new(
         ctrl_sender: SyncSender<ControlMessage>,
@@ -238,8 +240,8 @@ impl EarTrainingPracticeProgram {
     }
 
     fn key_pair() -> (u8, u8) {
-        let key1 = rand::thread_rng().gen_range(60..=72);
-        return (key1, rand::thread_rng().gen_range(60..=72));
+        let key1 = rand::thread_rng().gen_range(24..=90);
+        return (key1, rand::thread_rng().gen_range(key1 - 12..=key1 + 12));
     }
 
     fn on_keypress(&mut self, _latest: KeyMessage) {
@@ -247,11 +249,17 @@ impl EarTrainingPracticeProgram {
             return;
         }
 
-        let last_key = self.key_db.last_n_key_ups_reversed(1);
-        if !last_key.is_empty() {
-            if last_key[0].key == self.first_key && _latest.key == self.second_key {
+        let last_keys = self.key_db.last_n_key_downs_reversed(2);
+        if last_keys.len() == 2 {
+            if last_keys[1].key == self.first_key && last_keys[0].key == self.second_key {
+                self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
                 say("you got it".into());
                 (self.first_key, self.second_key) = Self::key_pair();
+                self.play_pair();
+            }
+            if last_keys[1].key == SOS_KEY && last_keys[0].key == SOS_KEY {
+                self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
+                say("here's the chord".into());
                 self.play_pair();
             }
         }
