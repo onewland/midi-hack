@@ -1,6 +1,8 @@
 use std::{
+    i16,
     sync::mpsc::SyncSender,
     sync::{mpsc::Receiver, Arc},
+    u16, u8,
 };
 
 use log::{info, trace};
@@ -213,8 +215,8 @@ pub struct EarTrainingPracticeProgram {
     midi_out_sender: SyncSender<KeyMessage>,
     key_receiver: Receiver<KeyMessage>,
     key_db: Arc<KeyDb>,
-    first_key: u8,
-    second_key: u8,
+    base_key: u8,
+    interval: i8,
 }
 
 const SOS_KEY: u8 = 21;
@@ -226,7 +228,7 @@ impl EarTrainingPracticeProgram {
         key_receiver: Receiver<KeyMessage>,
         key_db: Arc<KeyDb>,
     ) -> EarTrainingPracticeProgram {
-        let (key1, key2) = Self::key_pair();
+        let (base_key, interval) = Self::key_and_interval();
 
         EarTrainingPracticeProgram {
             state: PracticeProgramState::INITIALIZING,
@@ -234,14 +236,19 @@ impl EarTrainingPracticeProgram {
             ctrl_sender,
             key_receiver,
             key_db,
-            first_key: key1,
-            second_key: key2,
+            base_key,
+            interval,
         }
     }
 
-    fn key_pair() -> (u8, u8) {
-        let key1 = rand::thread_rng().gen_range(24..=90);
-        return (key1, rand::thread_rng().gen_range(key1 - 12..=key1 + 12));
+    fn key_and_interval() -> (u8, i8) {
+        let key = rand::thread_rng().gen_range(36..=78);
+        let interval = rand::thread_rng().gen_range(-12..=12);
+        return (key, interval);
+    }
+
+    fn second_key(&self) -> u8 {
+        return (self.base_key as i16 + self.interval as i16) as u8;
     }
 
     fn on_keypress(&mut self, _latest: KeyMessage) {
@@ -251,13 +258,17 @@ impl EarTrainingPracticeProgram {
 
         let last_keys = self.key_db.last_n_key_downs_reversed(2);
         if last_keys.len() == 2 {
-            if last_keys[1].key == self.first_key && last_keys[0].key == self.second_key {
+            if last_keys[1].key == self.base_key && last_keys[0].key == self.second_key() {
                 self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
-                say("you got it".into());
-                (self.first_key, self.second_key) = Self::key_pair();
+                say("perfect match".into());
+                (self.base_key, self.interval) = Self::key_and_interval();
                 self.play_pair();
-            }
-            if last_keys[1].key == SOS_KEY && last_keys[0].key == SOS_KEY {
+            } else if (last_keys[1].key as i16 - last_keys[0].key as i16) as i8 == self.interval {
+                self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
+                say("correct interval".into());
+                (self.base_key, self.interval) = Self::key_and_interval();
+                self.play_pair();
+            } else if last_keys[1].key == SOS_KEY && last_keys[0].key == SOS_KEY {
                 self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
                 say("here's the chord".into());
                 self.play_pair();
@@ -288,8 +299,8 @@ impl EarTrainingPracticeProgram {
     }
 
     fn play_pair(&self) {
-        self.play_note(self.first_key, 1000);
-        self.play_note(self.second_key, 1000);
+        self.play_note(self.base_key, 1000);
+        self.play_note(self.second_key(), 1000);
     }
 }
 
