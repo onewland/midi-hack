@@ -209,6 +209,11 @@ impl PracticeProgram for CircleOfFourthsPracticeProgram {
     }
 }
 
+enum IntervalPlaybackMode {
+    Open,
+    Closed,
+}
+
 pub struct EarTrainingPracticeProgram {
     state: PracticeProgramState,
     ctrl_sender: SyncSender<ControlMessage>,
@@ -217,6 +222,7 @@ pub struct EarTrainingPracticeProgram {
     key_db: Arc<KeyDb>,
     base_key: u8,
     interval: i8,
+    playback_mode: IntervalPlaybackMode,
 }
 
 const SOS_KEY: u8 = 21;
@@ -238,6 +244,7 @@ impl EarTrainingPracticeProgram {
             key_db,
             base_key,
             interval,
+            playback_mode: IntervalPlaybackMode::Closed,
         }
     }
 
@@ -277,14 +284,24 @@ impl EarTrainingPracticeProgram {
     }
 
     fn play_note(&self, key: u8, duration_millis: u64) {
-        let down = KeyMessage {
-            timestamp: 0,
-            message_type: crate::midi::MidiMessageTypes::NoteOn,
-            key: key,
-        };
+        self.send_note_on(key);
+        std::thread::sleep(std::time::Duration::from_millis(duration_millis));
+        self.send_note_off(key);
+    }
+
+    fn send_note_off(&self, key: u8) {
         let up = KeyMessage {
             timestamp: 0,
             message_type: crate::midi::MidiMessageTypes::NoteOff,
+            key: key,
+        };
+        self.midi_out_sender.send(up).unwrap();
+    }
+
+    fn send_note_on(&self, key: u8) {
+        let down = KeyMessage {
+            timestamp: 0,
+            message_type: crate::midi::MidiMessageTypes::NoteOn,
             key: key,
         };
         // await channel readiness
@@ -294,13 +311,22 @@ impl EarTrainingPracticeProgram {
                 Err(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(duration_millis));
-        self.midi_out_sender.send(up).unwrap();
     }
 
     fn play_pair(&self) {
-        self.play_note(self.base_key, 1000);
-        self.play_note(self.second_key(), 1000);
+        match self.playback_mode {
+            IntervalPlaybackMode::Open => {
+                self.play_note(self.base_key, 1000);
+                self.play_note(self.second_key(), 1000);
+            }
+            IntervalPlaybackMode::Closed => {
+                self.send_note_on(self.base_key);
+                self.send_note_on(self.second_key());
+                std::thread::sleep(std::time::Duration::from_millis(1000));
+                self.send_note_off(self.base_key);
+                self.send_note_off(self.second_key());
+            }
+        }
     }
 }
 

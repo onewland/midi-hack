@@ -175,7 +175,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     let (playback_sender, playback_receiver) = sync_channel(1);
     let (control_sender, control_receiver) = sync_channel(10);
     let (program_sender, program_receiver) = sync_channel(10);
-    let (midi_out_sender, midi_out_receiver) = sync_channel::<KeyMessage>(1);
+    // the size of this queue will impact number of simultaneous-sounding notes emitted
+    // (e.g. if set to 1 you can never get a "chord sound")
+    let (midi_out_sender, midi_out_receiver) = sync_channel::<KeyMessage>(5);
 
     let control_sender_tty = control_sender.clone();
     let control_sender_practice_program = control_sender.clone();
