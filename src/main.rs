@@ -199,6 +199,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
                 midi_out_sender,
                 program_receiver,
                 key_reader_ro_copy,
+                true,
             );
             program.run();
         }

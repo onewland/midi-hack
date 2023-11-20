@@ -12,7 +12,7 @@ pub struct KeyDb {
     buf: RwLock<Vec<KeyMessage>>,
 }
 
-fn always_true(k: &&KeyMessage) -> bool {
+fn always_true(_k: &&KeyMessage) -> bool {
     true
 }
 
