@@ -8,8 +8,11 @@ use std::{
 use log::{info, trace};
 use rand::Rng;
 
-use crate::key_handler::{ControlMessage, KeyDb};
 use crate::speech::get_pronunciation;
+use crate::{
+    key_handler::{ControlMessage, KeyDb},
+    speech::get_interval_name,
+};
 use crate::{midi::KeyMessage, speech::say};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -221,7 +224,7 @@ pub struct EarTrainingPracticeProgram {
     key_receiver: Receiver<KeyMessage>,
     key_db: Arc<KeyDb>,
     base_key: u8,
-    interval: i8,
+    interval: u8,
     playback_mode: IntervalPlaybackMode,
 }
 
@@ -248,14 +251,14 @@ impl EarTrainingPracticeProgram {
         }
     }
 
-    fn key_and_interval() -> (u8, i8) {
-        let key = rand::thread_rng().gen_range(36..=78);
-        let interval = rand::thread_rng().gen_range(-12..=12);
+    fn key_and_interval() -> (u8, u8) {
+        let key = rand::thread_rng().gen_range(22..=78);
+        let interval = rand::thread_rng().gen_range(0..=12);
         return (key, interval);
     }
 
     fn second_key(&self) -> u8 {
-        return (self.base_key as i16 + self.interval as i16) as u8;
+        return self.base_key + self.interval;
     }
 
     fn on_keypress(&mut self, _latest: KeyMessage) {
@@ -270,10 +273,11 @@ impl EarTrainingPracticeProgram {
                 say("perfect match".into());
                 (self.base_key, self.interval) = Self::key_and_interval();
                 self.play_pair();
-            } else if (last_keys[1].key as i16 - last_keys[0].key as i16) as i8 == self.interval {
+            } else if (last_keys[1].key as i16 - last_keys[0].key as i16) == self.interval.into() {
                 self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
-                say("correct interval".into());
+                say(format!("correct interval, {}", get_interval_name(self.interval)).into());
                 (self.base_key, self.interval) = Self::key_and_interval();
+                say("new chord".into());
                 self.play_pair();
             } else if last_keys[1].key == SOS_KEY && last_keys[0].key == SOS_KEY {
                 self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
