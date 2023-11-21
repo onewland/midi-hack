@@ -6,12 +6,11 @@ use std::{
 use log::{info, trace};
 use rand::Rng;
 
-use crate::speech::get_pronunciation;
 use crate::{
     key_handler::{ControlMessage, KeyDb},
-    speech::get_interval_name,
+    midi::KeyMessage,
+    speech::{get_interval_name, get_pronunciation, say},
 };
-use crate::{midi::KeyMessage, speech::say};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PracticeProgramState {
