@@ -108,9 +108,7 @@ Assign key messages to hands based on a standard person's max octave reach.
 
 ### More support for chords + scales
 
-### Use MIDI out for ear training
-Play a note sequence or chord using the device of the musician, and have them
-try to mimic. Maybe provide hints in between.
+### Ear training improvements
 
 - more options for multiple-note chords
 - key recognition for simultaneous press or in either direction
@@ -118,5 +116,3 @@ try to mimic. Maybe provide hints in between.
 ### Tempo detection
 Based on a run of notes, approximately what BPM is the player playing at? Where
 are they deviating from the beat?
-
-## Milestones Finished
