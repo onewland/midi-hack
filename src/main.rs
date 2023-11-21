@@ -152,8 +152,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
             &in_ports[0]
         }
     };
-    let out_port = match in_ports.len() {
-        0 => panic!("no device found"),
+    let out_port = match out_ports.len() {
+        0 => None,
         len => {
             assert!(len > cli.midi_device_port);
             let device_name = midi_out
@@ -164,10 +164,11 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
                 cli.midi_device_port, device_name
             );
             sentry::configure_scope(|scope| scope.set_tag("midi_out_device", device_name));
-            &out_ports[0]
+            Some(&out_ports[0])
         }
     };
-    let mut midi_out_connection = midi_out.connect(out_port, "midir-write-output")?;
+    let midi_out_connection =
+        out_port.map(|port| midi_out.connect(port, "midir-write-output").unwrap());
 
     info!("output connection established");
 
@@ -194,6 +195,10 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
             program.run();
         }
         "ear-training" => {
+            assert!(
+                midi_out_connection.is_some(),
+                "functional MIDI out required for ear training"
+            );
             let program = EarTrainingPracticeProgram::new(
                 control_sender_practice_program,
                 midi_out_sender,
@@ -248,20 +253,23 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
 
     key_reader.start_recv_loop(playback_receiver, control_receiver);
 
-    std::thread::spawn(move || {
-        const WAIT_DELAY: Duration = std::time::Duration::from_secs(1);
-        info!("midi out receive loop started");
-        loop {
-            match midi_out_receiver.recv_timeout(WAIT_DELAY) {
-                Ok(message) => {
-                    trace!("emitting {:?}", message);
-                    midi_out_connection.send(&message.encode())
+    if midi_out_connection.is_some() {
+        std::thread::spawn(move || {
+            const WAIT_DELAY: Duration = std::time::Duration::from_secs(1);
+            let mut midi_out = midi_out_connection.unwrap();
+            info!("midi out receive loop started");
+            loop {
+                match midi_out_receiver.recv_timeout(WAIT_DELAY) {
+                    Ok(message) => {
+                        trace!("emitting {:?}", message);
+                        midi_out.send(&message.encode())
+                    }
+                    Err(_recv_timeout_error) => Ok(()), // this is fine
                 }
-                Err(_recv_timeout_error) => Ok(()), // this is fine
+                .unwrap();
             }
-            .unwrap();
-        }
-    });
+        });
+    }
 
     let mut stop_the_show = false;
 
