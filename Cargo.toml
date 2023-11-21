@@ -7,8 +7,10 @@ edition = "2021"
 
 [dependencies]
 sentry = "0.27.0"
+coremidi="^0.8.0"
 midir = "0.8.0"
 log="0.4.0"
 env_logger="0.9.0"
-clap={version = "3.2.20", features = ["derive"]}
+clap={version = "4.4.8", features = ["derive"]}
 lazy_static="1.4.0"
+rand = "0.8.4"

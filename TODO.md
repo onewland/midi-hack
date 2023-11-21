@@ -112,6 +112,9 @@ Assign key messages to hands based on a standard person's max octave reach.
 Play a note sequence or chord using the device of the musician, and have them
 try to mimic. Maybe provide hints in between.
 
+- more options for multiple-note chords
+- key recognition for simultaneous press or in either direction
+
 ### Tempo detection
 Based on a run of notes, approximately what BPM is the player playing at? Where
 are they deviating from the beat?

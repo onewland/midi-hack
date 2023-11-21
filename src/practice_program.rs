@@ -4,10 +4,13 @@ use std::{
 };
 
 use log::{info, trace};
+use rand::Rng;
 
-use crate::key_handler::{ControlMessage, KeyDb};
-use crate::speech::get_pronunciation;
-use crate::{midi::KeyMessage, speech::say};
+use crate::{
+    key_handler::{ControlMessage, KeyDb},
+    midi::KeyMessage,
+    speech::{get_interval_name, get_pronunciation, say},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PracticeProgramState {
@@ -202,6 +205,170 @@ impl PracticeProgram for CircleOfFourthsPracticeProgram {
         std::thread::spawn(move || loop {
             let msg = self.key_receiver.recv().unwrap();
             self.on_keypress(msg);
+        });
+    }
+}
+
+enum IntervalPlaybackMode {
+    Open,
+    Closed,
+}
+
+pub struct EarTrainingPracticeProgram {
+    state: PracticeProgramState,
+    ctrl_sender: SyncSender<ControlMessage>,
+    midi_out_sender: SyncSender<KeyMessage>,
+    key_receiver: Receiver<KeyMessage>,
+    key_db: Arc<KeyDb>,
+    randomize_playback_modes: bool,
+    current_base_key: u8,
+    current_interval: u8,
+    current_playback_mode: IntervalPlaybackMode,
+}
+
+const SOS_KEY: u8 = 21;
+
+impl EarTrainingPracticeProgram {
+    pub fn new(
+        ctrl_sender: SyncSender<ControlMessage>,
+        midi_out_sender: SyncSender<KeyMessage>,
+        key_receiver: Receiver<KeyMessage>,
+        key_db: Arc<KeyDb>,
+        randomize_playback_modes: bool,
+    ) -> EarTrainingPracticeProgram {
+        let (base_key, interval) = Self::key_and_interval();
+
+        EarTrainingPracticeProgram {
+            state: PracticeProgramState::INITIALIZING,
+            midi_out_sender,
+            ctrl_sender,
+            key_receiver,
+            key_db,
+            randomize_playback_modes,
+            current_base_key: base_key,
+            current_interval: interval,
+            current_playback_mode: IntervalPlaybackMode::Closed,
+        }
+    }
+
+    fn key_and_interval() -> (u8, u8) {
+        let key = rand::thread_rng().gen_range(22..=78);
+        let interval = rand::thread_rng().gen_range(0..=12);
+        return (key, interval);
+    }
+
+    fn second_key(&self) -> u8 {
+        return self.current_base_key + self.current_interval;
+    }
+
+    fn on_keypress(&mut self, _latest: KeyMessage) {
+        if self.state == PracticeProgramState::FINISHED {
+            return;
+        }
+
+        let last_keys = self.key_db.last_n_key_downs_reversed(2);
+        if last_keys.len() == 2 {
+            if last_keys[1].key == self.current_base_key && last_keys[0].key == self.second_key() {
+                self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
+                say("perfect match".into());
+                self.next_test();
+            } else if (last_keys[1].key as i16 - last_keys[0].key as i16)
+                == self.current_interval.into()
+            {
+                self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
+                say(format!(
+                    "correct interval, {}",
+                    get_interval_name(self.current_interval)
+                )
+                .into());
+                self.next_test();
+            } else if last_keys[1].key == SOS_KEY && last_keys[0].key == SOS_KEY {
+                self.ctrl_sender.send(ControlMessage::NewRun).unwrap();
+                say("here's the chord".into());
+                self.play_pair();
+            }
+        }
+    }
+
+    fn next_test(&mut self) {
+        (self.current_base_key, self.current_interval) = Self::key_and_interval();
+        if self.randomize_playback_modes {
+            self.current_playback_mode = if rand::random::<bool>() {
+                IntervalPlaybackMode::Open
+            } else {
+                IntervalPlaybackMode::Closed
+            }
+        }
+        say("new chord".into());
+
+        self.play_pair();
+    }
+
+    fn play_note(&self, key: u8, duration_millis: u64) {
+        self.send_note_on(key);
+        std::thread::sleep(std::time::Duration::from_millis(duration_millis));
+        self.send_note_off(key);
+    }
+
+    fn send_note_off(&self, key: u8) {
+        let up = KeyMessage {
+            timestamp: 0,
+            message_type: crate::midi::MidiMessageTypes::NoteOff,
+            key: key,
+        };
+        self.midi_out_sender.send(up).unwrap();
+    }
+
+    fn send_note_on(&self, key: u8) {
+        let down = KeyMessage {
+            timestamp: 0,
+            message_type: crate::midi::MidiMessageTypes::NoteOn,
+            key: key,
+        };
+        // await channel readiness
+        loop {
+            match self.midi_out_sender.try_send(down) {
+                Ok(_) => break,
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
+            }
+        }
+    }
+
+    fn play_pair(&self) {
+        match self.current_playback_mode {
+            IntervalPlaybackMode::Open => {
+                self.play_note(self.current_base_key, 1000);
+                self.play_note(self.second_key(), 1000);
+            }
+            IntervalPlaybackMode::Closed => {
+                self.send_note_on(self.current_base_key);
+                self.send_note_on(self.second_key());
+                std::thread::sleep(std::time::Duration::from_millis(1000));
+                self.send_note_off(self.current_base_key);
+                self.send_note_off(self.second_key());
+            }
+        }
+    }
+}
+
+impl PracticeProgram for EarTrainingPracticeProgram {
+    fn get_state(&self) -> PracticeProgramState {
+        return self.state;
+    }
+
+    fn run(mut self) {
+        info!("starting EarTrainingPracticeProgram");
+        self.state = PracticeProgramState::LISTENING;
+
+        std::thread::spawn(move || {
+            say("starting ear training".into());
+
+            self.next_test();
+
+            loop {
+                let msg = self.key_receiver.recv().unwrap();
+                self.on_keypress(msg);
+            }
         });
     }
 }

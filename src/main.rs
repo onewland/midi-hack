@@ -1,21 +1,24 @@
-use std::env;
 use std::io::stdin;
 use std::sync::Arc;
+
+use std::time::Duration;
 use std::{cmp::max, thread::JoinHandle};
+
 // use std::process::Command;
 use std::error::Error;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::{sync_channel, SyncSender};
 
 use clap::Parser;
-use log::info;
+use log::{debug, info, trace};
 
 use midi_hack::key_handler::{ControlMessage, KeyDb};
-use midi_hack::midi::{build_key_message, KeyMessage, KNOWN_MESSAGE_TYPES};
+use midi_hack::midi::{KeyMessage, KNOWN_MESSAGE_TYPES};
 use midi_hack::practice_program::{
-    CircleOfFourthsPracticeProgram, FreePlayPracticeProgram, PracticeProgram,
+    CircleOfFourthsPracticeProgram, EarTrainingPracticeProgram, FreePlayPracticeProgram,
+    PracticeProgram,
 };
-use midir::{Ignore, MidiInput};
+use midir::{Ignore, MidiInput, MidiOutput};
 
 const HEARTBEATS_PER_AUTO_NEW_RUN: usize = 100;
 
@@ -132,26 +135,50 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     let mut input = String::new();
     let mut midi_in = MidiInput::new("midir reading input")?;
     midi_in.ignore(Ignore::None);
+    let midi_out: MidiOutput = MidiOutput::new("midir_controller_client")?;
+    let out_ports = midi_out.ports();
+    debug!("{} ports in midi_out", midi_out.port_count());
     let in_ports = midi_in.ports();
     let in_port = match in_ports.len() {
         0 => panic!("no device found"),
-        1 => {
-            let device_name = midi_in.port_name(&in_ports[0]).unwrap();
-            println!("Choosing the only available input port: {}", device_name);
-            sentry::configure_scope(|scope| scope.set_tag("midi_device", device_name));
+        len => {
+            assert!(len > cli.midi_device_port);
+            let device_name = midi_in.port_name(&in_ports[cli.midi_device_port]).unwrap();
+            println!(
+                "Loading input port {}, friendly name: \"{}\"",
+                cli.midi_device_port, device_name
+            );
+            sentry::configure_scope(|scope| scope.set_tag("midi_in_device", device_name));
             &in_ports[0]
         }
-        _ => {
-            panic!("don't know how to deal with multiple devices")
+    };
+    let out_port = match in_ports.len() {
+        0 => panic!("no device found"),
+        len => {
+            assert!(len > cli.midi_device_port);
+            let device_name = midi_out
+                .port_name(&out_ports[cli.midi_device_port])
+                .unwrap();
+            println!(
+                "Loading output port {}, friendly name: \"{}\"",
+                cli.midi_device_port, device_name
+            );
+            sentry::configure_scope(|scope| scope.set_tag("midi_out_device", device_name));
+            &out_ports[0]
         }
     };
-    println!("\nOpening connection");
-    let _in_port_name = midi_in.port_name(in_port)?;
+    let mut midi_out_connection = midi_out.connect(out_port, "midir-write-output")?;
+
+    info!("output connection established");
 
     // Listener setup
     let (playback_sender, playback_receiver) = sync_channel(1);
     let (control_sender, control_receiver) = sync_channel(10);
     let (program_sender, program_receiver) = sync_channel(10);
+    // the size of this queue will impact number of simultaneous-sounding notes emitted
+    // (e.g. if set to 1 you can never get a "chord sound")
+    let (midi_out_sender, midi_out_receiver) = sync_channel::<KeyMessage>(5);
+
     let control_sender_tty = control_sender.clone();
     let control_sender_practice_program = control_sender.clone();
     let key_db = Arc::from(KeyDb::new());
@@ -163,6 +190,16 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
                 control_sender_practice_program,
                 program_receiver,
                 key_reader_ro_copy,
+            );
+            program.run();
+        }
+        "ear-training" => {
+            let program = EarTrainingPracticeProgram::new(
+                control_sender_practice_program,
+                midi_out_sender,
+                program_receiver,
+                key_reader_ro_copy,
+                true,
             );
             program.run();
         }
@@ -192,7 +229,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
             if message.len() == 3 {
                 if message[0] == midi_hack::midi::KEY_UP || message[0] == midi_hack::midi::KEY_DOWN
                 {
-                    let parsed_message = build_key_message(stamp, message);
+                    let parsed_message = KeyMessage::from_midi(stamp, message);
                     playback_sender.send(parsed_message).unwrap();
                 }
             }
@@ -210,6 +247,21 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     });
 
     key_reader.start_recv_loop(playback_receiver, control_receiver);
+
+    std::thread::spawn(move || {
+        const WAIT_DELAY: Duration = std::time::Duration::from_secs(1);
+        info!("midi out receive loop started");
+        loop {
+            match midi_out_receiver.recv_timeout(WAIT_DELAY) {
+                Ok(message) => {
+                    trace!("emitting {:?}", message);
+                    midi_out_connection.send(&message.encode())
+                }
+                Err(_recv_timeout_error) => Ok(()), // this is fine
+            }
+            .unwrap();
+        }
+    });
 
     let mut stop_the_show = false;
 
@@ -234,7 +286,12 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
 
 #[derive(Parser)]
 struct Cli {
+    /// Name of the practice program to play
     practice_program: String,
+
+    /// Midi device port (indexed by 0)
+    #[arg(short, long, default_value_t = 0)]
+    midi_device_port: usize,
 }
 
 fn main() {
