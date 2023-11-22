@@ -1,7 +1,8 @@
 # midi_hack
 
-A silly little program for piano practice using MIDI.
+A silly little program for piano practice using MIDI. 
 
+The primary goal is to not require you to look at the screen while playing.
 It uses the say command on MacOS to give verbal instructions, then verifies
 (verbally) whether you followed those instructions correctly.
 
