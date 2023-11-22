@@ -12,7 +12,7 @@ pub fn is_minor_maj_7_chord(buf: &Vec<KeyMessage>) -> bool {
 
     let key_downs: Vec<&KeyMessage> = buf
         .iter()
-        .filter(|m| m.message_type == MidiMessageTypes::KeyDown)
+        .filter(|m| m.message_type == MidiMessageTypes::NoteOn)
         .collect();
 
     let timestamp_threshold = 30000;
