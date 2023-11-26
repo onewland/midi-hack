@@ -1,55 +1,23 @@
+use std::collections::HashSet;
+
 use log::trace;
 
-use crate::midi::{KeyMessage, MidiMessageTypes};
+use crate::{
+    key_handler::{HoldStatus, TimeBucketedSparseKeyData},
+    midi::KeyMessage,
+};
 
-pub fn is_minor_maj_7_chord(buf: &Vec<KeyMessage>) -> bool {
-    let mut major_minor_chord_c = vec!["C", "Eb", "G", "B"];
-    major_minor_chord_c.sort();
+pub fn is_minor_maj_7_chord(buf: &TimeBucketedSparseKeyData, root_key: u8) -> bool {
+    let relevant_keys = HashSet::from([root_key, root_key + 3, root_key + 7, root_key + 11]);
 
-    if buf.len() < 8 {
-        return false;
-    }
+    if let Some((_ts, last_view)) = buf.last_key_value() {
+        trace!("last_view: {:?}", last_view);
+        let key_states = last_view.iter().filter(|status| {
+            (status.status == HoldStatus::DOWN || status.status == HoldStatus::PRESS)
+                && relevant_keys.contains(&status.key)
+        });
 
-    let key_downs: Vec<&KeyMessage> = buf
-        .iter()
-        .filter(|m| m.message_type == MidiMessageTypes::NoteOn)
-        .collect();
-
-    let timestamp_threshold = 30000;
-
-    if key_downs.len() >= 4 {
-        let mut start_run_index = 0;
-        while start_run_index < key_downs.len() {
-            let mut end_run_idx = start_run_index + 1;
-
-            while end_run_idx < key_downs.len()
-                && key_downs[end_run_idx].timestamp - key_downs[start_run_index].timestamp
-                    < timestamp_threshold
-            {
-                end_run_idx += 1;
-            }
-
-            let mut key_down_notes: Vec<&str> = key_downs
-                .get(start_run_index..end_run_idx)
-                .unwrap()
-                .iter()
-                .map(|m| m.note_name())
-                .collect();
-            key_down_notes.sort();
-
-            if key_down_notes == major_minor_chord_c {
-                return true;
-            } else {
-                trace!(
-                    "run indices = ({},{}), sorted_notes = {:?}, reference = {:?}",
-                    start_run_index,
-                    end_run_idx,
-                    key_down_notes,
-                    major_minor_chord_c
-                );
-            }
-            start_run_index += 1
-        }
+        return Vec::from_iter(key_states).len() == 4;
     }
 
     return false;
@@ -74,11 +42,11 @@ pub fn detect_run(
     reverse_chron_key_events: &[KeyMessage],
     in_order_increments: &[i8],
 ) -> Option<KeyMessage> {
-    trace!(
-        "detect_run({:?},{:?})",
-        reverse_chron_key_events,
-        in_order_increments
-    );
+    // trace!(
+    //     "detect_run({:?},{:?})",
+    //     reverse_chron_key_events,
+    //     in_order_increments
+    // );
     if reverse_chron_key_events.len() != in_order_increments.len() + 1 {
         panic!(
             "bad parameters passed to detect_run: {} events and {} increments (increments must be 1 less long than events)",

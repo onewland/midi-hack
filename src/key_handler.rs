@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::RwLock,
-};
+use std::{collections::BTreeMap, sync::RwLock};
 
 use log::trace;
 
@@ -25,15 +22,17 @@ pub enum HoldStatus {
 
 #[derive(Debug, Clone, Copy)]
 pub struct KeyStatus {
-    key: u8,
-    status: HoldStatus,
+    pub key: u8,
+    pub status: HoldStatus,
 }
+
+pub type TimeBucketedSparseKeyData = BTreeMap<u64, Vec<KeyStatus>>;
 
 pub struct KeyDb {
     ///
     /// Map of timestamp to hold data (this is filled in on-demand)
     ///
-    holds: RwLock<BTreeMap<u64, Vec<KeyStatus>>>,
+    holds: RwLock<TimeBucketedSparseKeyData>,
     linear_buf: RwLock<Vec<KeyMessage>>,
     base_time: u64,
 }
@@ -161,5 +160,9 @@ impl KeyDb {
             .take(n)
             .map(|k| *k)
             .collect::<Vec<KeyMessage>>();
+    }
+
+    pub fn get_hold_data(&self) -> TimeBucketedSparseKeyData {
+        return self.holds.read().unwrap().to_owned();
     }
 }

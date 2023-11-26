@@ -105,7 +105,7 @@ impl FreePlayPracticeProgram {
             }
         }
 
-        let result = crate::music::is_minor_maj_7_chord(&kmsg_log);
+        let result = crate::music::is_minor_maj_7_chord(&self.key_db.get_hold_data(), 48);
         if result {
             log::info!(
                 "user played minor-maj7 chord starting at {}",
