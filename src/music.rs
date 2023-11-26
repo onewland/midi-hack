@@ -5,7 +5,9 @@ use log::trace;
 use crate::key_handler::TimeBucketedSparseKeyData;
 use crate::midi::KeyMessage;
 
-pub fn is_minor_maj_7_chord(buf: &TimeBucketedSparseKeyData, root_key: u8) -> bool {
+/// returns true if a major-minor seven chord rooted by root_key is in the most recent interval
+/// (allowing for the possiblity of other notes to be played simultaneously without returning false)
+pub fn is_minor_maj_7_chord_in_holds(buf: &TimeBucketedSparseKeyData, root_key: u8) -> bool {
     let relevant_keys = HashSet::from([root_key, root_key + 3, root_key + 7, root_key + 11]);
 
     return all_keys_down_others_allowed(buf, relevant_keys);
