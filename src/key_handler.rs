@@ -24,7 +24,7 @@ pub enum HoldStatus {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Hold {
+pub struct KeyStatus {
     key: u8,
     status: HoldStatus,
 }
@@ -33,7 +33,7 @@ pub struct KeyDb {
     ///
     /// Map of timestamp to hold data (this is filled in on-demand)
     ///
-    holds: RwLock<BTreeMap<u64, Vec<Hold>>>,
+    holds: RwLock<BTreeMap<u64, Vec<KeyStatus>>>,
     linear_buf: RwLock<Vec<KeyMessage>>,
     base_time: u64,
 }
@@ -89,13 +89,13 @@ impl KeyDb {
                                     && (hold.status == HoldStatus::DOWN
                                         || hold.status == HoldStatus::PRESS)
                                 {
-                                    Hold {
+                                    KeyStatus {
                                         key: msg.key,
                                         status: HoldStatus::EMPTY,
                                     }
                                 } else if hold.status == HoldStatus::PRESS {
                                     // a key had PRESS in the last timestamp, transition to DOWN
-                                    Hold {
+                                    KeyStatus {
                                         key: hold.key,
                                         status: HoldStatus::DOWN,
                                     }
@@ -107,7 +107,7 @@ impl KeyDb {
                     );
 
                     if msg.message_type == MidiMessageTypes::NoteOn {
-                        new_holds.push(Hold {
+                        new_holds.push(KeyStatus {
                             key: msg.key,
                             status: HoldStatus::PRESS,
                         })
@@ -118,7 +118,7 @@ impl KeyDb {
                 // no holds exist
                 else {
                     if msg.message_type == MidiMessageTypes::NoteOn {
-                        let new_hold = Hold {
+                        let new_hold = KeyStatus {
                             key: msg.key,
                             status: HoldStatus::PRESS,
                         };

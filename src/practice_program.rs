@@ -43,7 +43,7 @@ impl PracticeProgram for FreePlayPracticeProgram {
         self.state = PracticeProgramState::LISTENING;
         std::thread::spawn(move || loop {
             let msg = self.key_receiver.recv().unwrap();
-            self.on_keypress(msg);
+            self.on_key_message(msg);
         });
     }
 }
@@ -62,7 +62,7 @@ impl FreePlayPracticeProgram {
         }
     }
 
-    fn on_keypress(&self, latest: KeyMessage) {
+    fn on_key_message(&self, latest: KeyMessage) {
         log::trace!("received KeyMessage {}", latest.to_string());
         let kmsg_log = self.key_db.flat_message_log();
         let major_scale_deltas = [2, 2, 1, 2, 2, 2, 1];
@@ -163,7 +163,7 @@ impl CircleOfFourthsPracticeProgram {
         }
     }
 
-    fn on_keypress(&mut self, _latest: KeyMessage) {
+    fn on_key_message(&mut self, _latest: KeyMessage) {
         if self.state == PracticeProgramState::FINISHED {
             return;
         }
@@ -204,7 +204,7 @@ impl PracticeProgram for CircleOfFourthsPracticeProgram {
         self.state = PracticeProgramState::LISTENING;
         std::thread::spawn(move || loop {
             let msg = self.key_receiver.recv().unwrap();
-            self.on_keypress(msg);
+            self.on_key_message(msg);
         });
     }
 }
@@ -261,7 +261,7 @@ impl EarTrainingPracticeProgram {
         return self.current_base_key + self.current_interval;
     }
 
-    fn on_keypress(&mut self, _latest: KeyMessage) {
+    fn on_key_message(&mut self, _latest: KeyMessage) {
         if self.state == PracticeProgramState::FINISHED {
             return;
         }
@@ -367,7 +367,7 @@ impl PracticeProgram for EarTrainingPracticeProgram {
 
             loop {
                 let msg = self.key_receiver.recv().unwrap();
-                self.on_keypress(msg);
+                self.on_key_message(msg);
             }
         });
     }

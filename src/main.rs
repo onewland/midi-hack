@@ -57,7 +57,7 @@ impl KeyLogAndDispatch {
             hit_end = hit_end
                 || listener
                     .as_ref()
-                    .on_keypress(Arc::clone(&self.key_db), message);
+                    .on_key_message(Arc::clone(&self.key_db), message);
         }
         if hit_end {
             self.end_run()
@@ -123,7 +123,7 @@ impl KeyLogAndDispatch {
 trait RunEndListener {
     // RunEndListener listens on runs for the end, if it returns
     // true it has detected an end of a run, false means that it has not
-    fn on_keypress(&self, kmsg_log: Arc<KeyDb>, latest: KeyMessage) -> bool;
+    fn on_key_message(&self, kmsg_log: Arc<KeyDb>, latest: KeyMessage) -> bool;
 }
 
 fn run(cli: Cli) -> Result<(), Box<dyn Error>> {

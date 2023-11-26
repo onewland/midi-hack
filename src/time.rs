@@ -1,7 +1,5 @@
 use std::{sync::atomic::AtomicU64, thread::spawn, time::Duration};
 
-use log::trace;
-
 static TIMER: AtomicU64 = AtomicU64::new(0);
 const INCREMENT: u64 = 100;
 
