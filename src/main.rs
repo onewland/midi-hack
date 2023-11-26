@@ -1,13 +1,8 @@
-use std::io::stdin;
-use std::sync::Arc;
-
-use std::time::Duration;
-use std::{cmp::max, thread::JoinHandle};
-
-// use std::process::Command;
 use std::error::Error;
-use std::sync::mpsc::Receiver;
-use std::sync::mpsc::{sync_channel, SyncSender};
+use std::io::stdin;
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use std::sync::Arc;
+use std::{cmp::max, thread::JoinHandle, time::Duration};
 
 use clap::Parser;
 use log::{debug, info, trace};
@@ -101,7 +96,8 @@ impl KeyLogAndDispatch {
 
             last_msg = Some(*msg);
         });
-        println!("]")
+        println!("]");
+        self.key_db.print_holds();
     }
 
     pub(crate) fn start_recv_loop(
@@ -252,6 +248,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     });
 
     key_reader.start_recv_loop(playback_receiver, control_receiver);
+    midi_hack::time::start_timer();
 
     if midi_out_connection.is_some() {
         std::thread::spawn(move || {
