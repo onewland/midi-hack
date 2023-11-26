@@ -1,13 +1,8 @@
-use std::io::stdin;
-use std::sync::Arc;
-
-use std::time::Duration;
-use std::{cmp::max, thread::JoinHandle};
-
-// use std::process::Command;
 use std::error::Error;
-use std::sync::mpsc::Receiver;
-use std::sync::mpsc::{sync_channel, SyncSender};
+use std::io::stdin;
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use std::sync::Arc;
+use std::{cmp::max, thread::JoinHandle, time::Duration};
 
 use clap::Parser;
 use log::{debug, info, trace};
@@ -62,7 +57,7 @@ impl KeyLogAndDispatch {
             hit_end = hit_end
                 || listener
                     .as_ref()
-                    .on_keypress(Arc::clone(&self.key_db), message);
+                    .on_key_message(Arc::clone(&self.key_db), message);
         }
         if hit_end {
             self.end_run()
@@ -101,7 +96,8 @@ impl KeyLogAndDispatch {
 
             last_msg = Some(*msg);
         });
-        println!("]")
+        println!("]");
+        self.key_db.print_holds();
     }
 
     pub(crate) fn start_recv_loop(
@@ -127,7 +123,7 @@ impl KeyLogAndDispatch {
 trait RunEndListener {
     // RunEndListener listens on runs for the end, if it returns
     // true it has detected an end of a run, false means that it has not
-    fn on_keypress(&self, kmsg_log: Arc<KeyDb>, latest: KeyMessage) -> bool;
+    fn on_key_message(&self, kmsg_log: Arc<KeyDb>, latest: KeyMessage) -> bool;
 }
 
 fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
@@ -182,7 +178,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
 
     let control_sender_tty = control_sender.clone();
     let control_sender_practice_program = control_sender.clone();
-    let key_db = Arc::from(KeyDb::new());
+    let key_db = Arc::from(KeyDb::new(256));
     let key_reader_ro_copy = Arc::clone(&key_db);
     let key_reader = KeyLogAndDispatch::new(program_sender, key_db);
     match cli.practice_program.as_ref() {
@@ -252,6 +248,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     });
 
     key_reader.start_recv_loop(playback_receiver, control_receiver);
+    midi_hack::time::start_timer();
 
     if midi_out_connection.is_some() {
         std::thread::spawn(move || {
