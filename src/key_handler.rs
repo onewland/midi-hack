@@ -2,10 +2,7 @@ use std::{collections::BTreeMap, sync::RwLock};
 
 use log::trace;
 
-use crate::{
-    midi::{KeyMessage, MidiMessageTypes},
-    time::get_time,
-};
+use crate::midi::{KeyMessage, MidiMessageTypes};
 
 pub enum ControlMessage {
     Heartbeat,
@@ -40,7 +37,7 @@ pub struct KeyDb {
     ///
     holds: RwLock<TimeBucketedSparseKeyData>,
     linear_buf: RwLock<Vec<KeyMessage>>,
-    base_time: u64,
+    max_bucket_count: usize,
 }
 
 fn always_true(_k: &&KeyMessage) -> bool {
@@ -54,7 +51,7 @@ impl KeyDb {
         KeyDb {
             linear_buf: RwLock::from(Vec::new()),
             holds: RwLock::from(BTreeMap::new()),
-            base_time: get_time(),
+            max_bucket_count: bucket_count,
         }
     }
 
@@ -72,7 +69,8 @@ impl KeyDb {
     }
 
     pub fn clear(&self) {
-        self.linear_buf.write().unwrap().clear()
+        self.linear_buf.write().unwrap().clear();
+        self.holds.write().unwrap().clear();
     }
 
     fn holds_update(&self, msg: KeyMessage) {
@@ -81,6 +79,7 @@ impl KeyDb {
                 let new_ts = crate::time::get_time();
                 trace!("[holds_update] new_ts = {new_ts}");
                 if let Some(last_seen) = holds.last_entry() {
+                    let old_ts = last_seen.key();
                     let old_holds = last_seen.get();
                     // conditions to consider:
                     let mut new_holds = Vec::from_iter(
@@ -118,6 +117,11 @@ impl KeyDb {
                         })
                     }
 
+                    if new_ts != *old_ts {
+                        while holds.len() >= self.max_bucket_count {
+                            holds.first_entry().unwrap().remove();
+                        }
+                    }
                     holds.insert(new_ts, new_holds);
                 }
                 // no holds exist
