@@ -2,24 +2,33 @@ use std::collections::HashSet;
 
 use log::trace;
 
-use crate::{
-    key_handler::{HoldStatus, TimeBucketedSparseKeyData},
-    midi::KeyMessage,
-};
+use crate::key_handler::TimeBucketedSparseKeyData;
+use crate::midi::KeyMessage;
 
 pub fn is_minor_maj_7_chord(buf: &TimeBucketedSparseKeyData, root_key: u8) -> bool {
     let relevant_keys = HashSet::from([root_key, root_key + 3, root_key + 7, root_key + 11]);
 
+    return all_keys_down_others_allowed(buf, relevant_keys);
+}
+
+/// returns true if all keys are down in the most recent interval
+/// (allowing for the possiblity of other notes to be played simultaneously without returning false)
+fn all_keys_down_others_allowed(
+    buf: &TimeBucketedSparseKeyData,
+    relevant_keys: HashSet<u8>,
+) -> bool {
     if let Some((_ts, last_view)) = buf.last_key_value() {
+        if last_view.len() < relevant_keys.len() {
+            return false;
+        }
+
         trace!("last_view: {:?}", last_view);
-        let key_states = last_view.iter().filter(|status| {
-            (status.status == HoldStatus::DOWN || status.status == HoldStatus::PRESS)
-                && relevant_keys.contains(&status.key)
-        });
+        let key_states = last_view
+            .iter()
+            .filter(|status| status.status.down_like() && relevant_keys.contains(&status.key));
 
-        return Vec::from_iter(key_states).len() == 4;
+        return Vec::from_iter(key_states).len() == relevant_keys.len();
     }
-
     return false;
 }
 

@@ -20,6 +20,12 @@ pub enum HoldStatus {
     DOWN,
 }
 
+impl HoldStatus {
+    pub fn down_like(self) -> bool {
+        self == HoldStatus::PRESS || self == HoldStatus::DOWN
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct KeyStatus {
     pub key: u8,
