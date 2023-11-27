@@ -52,40 +52,10 @@ For finding errors, it seems like they might need MIDI signals.
 
 ### TTS integration
 
-### Efficient time-sensitive note store
-Types of queries to support:
-
-1. Between t=~1.8 and t=~2.2, what are all notes currently being held?
-1. Between t=~5 and t=~7, what key up messages were observed in what order?
-1. Given two notes in a sequence that I know were played, when did the run start and finish?
-1. "Is this key not being pressed in this time range?" should be extremely fast as it is maybe the most common condition being checked
- 
-We don't want to require queries to be overly precise because people don't
-play with extreme precision. Something played at t=1.004s should be be considered
-"simultaneous" to something at t=1s for most queries.
+The speech kind of sucks. Need a better solution than `say`.
 
 #### How does sustain pedal fit here?
 `key down + pedal down` is treated as `key held down` until pedal lifts
-
-#### How is the data stored?
-
-This is an example of a Bb major chord being played:
-
-        A1 Bb1 B1 C2 C#2 D2 Eb2 E2 F2 ...
-      |----------------------------------
-b = 0 |    1 
-b = 1 |    1 
-b = 2 |    1             1
-b = 3 |    1             1
-b = 4 |    1             1          1
-b = 5 |    1             1          1
-b = 6 |                             1 
-
-Time is bucketd to `b` to the left by something like 100ns-1ms so that we
-don't mistake simultaneous playing for non-simultaneous.
-
-Entry into the data store should store in at least the prior and upcoming time bucket
-to allow for "fuzzy matching".
 
 ### Control with weird keys
 

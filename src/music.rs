@@ -24,7 +24,7 @@ fn all_keys_down_others_allowed(
             return false;
         }
 
-        trace!("last_view: {:?}", last_view);
+        trace!("all_keys_down_others_allowed last_view: {:?}", last_view);
         let key_states = last_view
             .iter()
             .filter(|status| status.status.down_like() && relevant_keys.contains(&status.key));
