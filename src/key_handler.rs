@@ -34,6 +34,9 @@ pub type TimeBucketedSparseKeyData = BTreeMap<u64, Vec<KeyStatus>>;
 #[derive(Clone)]
 pub struct HoldData {
     max_bucket_count: usize,
+    ///
+    /// Map of timestamp to hold data (this is filled in on-demand)
+    ///
     buf: TimeBucketedSparseKeyData,
 }
 
@@ -122,9 +125,12 @@ impl HoldData {
 
 pub struct KeyDb {
     ///
-    /// Map of timestamp to hold data (this is filled in on-demand)
+    /// Time-indexed history of what keys are being held (sparse)
     ///
     holds: RwLock<HoldData>,
+    ///
+    /// Ordered list of received MIDI KeyMessage[s]
+    ///
     linear_buf: RwLock<Vec<KeyMessage>>,
 }
 
